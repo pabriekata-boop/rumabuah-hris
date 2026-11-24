@@ -9,9 +9,6 @@ interface Karyawan {
   cabang?: string;
   lokasi_toko?: string;
   pin?: string;
-  shift_masuk?: string;
-  shift_pulang?: string;
-  hari_libur?: string;
 }
 
 interface AbsensiHariIni {
@@ -23,6 +20,14 @@ interface AbsensiHariIni {
   status_kehadiran: string;
 }
 
+interface JadwalShift {
+  id: string;
+  tanggal: string;
+  shift: string;
+  jam_masuk: string;
+  jam_pulang: string;
+}
+
 export default function HalamanKaryawan() {
   const [activeTab, setActiveTab] = useState<'absen' | 'lembur' | 'kasbon'>('absen');
   const [daftarKaryawan, setDaftarKaryawan] = useState<Karyawan[]>([]);
@@ -31,7 +36,8 @@ export default function HalamanKaryawan() {
   const [tanggalHariIni, setTanggalHariIni] = useState('');
   const [tanggalTampil, setTanggalTampil] = useState('');
 
-  // State Absen
+  // State Jadwal & Absen
+  const [jadwalKaryawan, setJadwalKaryawan] = useState<JadwalShift[]>([]);
   const [fotoFile, setFotoFile] = useState<File | null>(null);
   const [fotoPreview, setFotoPreview] = useState<string | null>(null);
   const [absenHariIni, setAbsenHariIni] = useState<AbsensiHariIni | null>(null);
@@ -85,27 +91,43 @@ export default function HalamanKaryawan() {
 
     if (!selectedId || !tanggalHariIni) {
       setAbsenHariIni(null);
+      setJadwalKaryawan([]);
       return;
     }
 
-    const cekAbsenHariIni = async () => {
+    const cekDataKaryawan = async () => {
       setChecking(true);
-      const { data, error } = await supabase
-        .from('absensi')
-        .select('*')
-        .eq('karyawan_id', selectedId)
-        .eq('tanggal', tanggalHariIni)
-        .maybeSingle();
 
-      if (error) {
-        setPesan('❌ Gagal cek absensi: ' + error.message);
+      const [resAbsen, resJadwal] = await Promise.all([
+        supabase
+          .from('absensi')
+          .select('*')
+          .eq('karyawan_id', selectedId)
+          .eq('tanggal', tanggalHariIni)
+          .maybeSingle(),
+        supabase
+          .from('jadwal_shift')
+          .select('*')
+          .eq('karyawan_id', selectedId)
+          .gte('tanggal', tanggalHariIni)
+          .order('tanggal', { ascending: true })
+          .limit(5),
+      ]);
+
+      if (resAbsen.error) {
+        setPesan('❌ Gagal cek absensi: ' + resAbsen.error.message);
       } else {
-        setAbsenHariIni(data);
+        setAbsenHariIni(resAbsen.data);
       }
+
+      if (resJadwal.data) {
+        setJadwalKaryawan(resJadwal.data);
+      }
+
       setChecking(false);
     };
 
-    cekAbsenHariIni();
+    cekDataKaryawan();
   }, [selectedId, tanggalHariIni]);
 
   const validasiPin = () => {
@@ -122,7 +144,6 @@ export default function HalamanKaryawan() {
     return true;
   };
 
-  // --- LOGIKA ABSEN ---
   const handlePilihFoto = (e: React.ChangeEvent<HTMLInputElement>) => {
     const file = e.target.files?.[0];
     if (file) {
@@ -219,7 +240,6 @@ export default function HalamanKaryawan() {
     }
   };
 
-  // --- LOGIKA LEMBUR ---
   const handleAjukanLembur = async (e: React.FormEvent) => {
     e.preventDefault();
     if (!validasiPin()) return;
@@ -254,7 +274,6 @@ export default function HalamanKaryawan() {
     }
   };
 
-  // --- LOGIKA KASBON ---
   const handleAjukanKasbon = async (e: React.FormEvent) => {
     e.preventDefault();
     if (!validasiPin()) return;
@@ -298,6 +317,16 @@ export default function HalamanKaryawan() {
     });
   };
 
+  const formatTanggalSingkat = (tglStr: string) => {
+    const [y, m, d] = tglStr.split('-').map(Number);
+    const dateObj = new Date(y, m - 1, d);
+    return dateObj.toLocaleDateString('id-ID', {
+      weekday: 'short',
+      day: 'numeric',
+      month: 'short',
+    });
+  };
+
   const butuhAbsen = selectedId && (!absenHariIni || !absenHariIni.jam_pulang);
 
   return (
@@ -326,7 +355,7 @@ export default function HalamanKaryawan() {
           ))}
         </div>
 
-        {/* Pilih Nama (Berlaku untuk semua tab) */}
+        {/* Pilih Nama */}
         <div className="text-left mb-4">
           <label className="block text-sm font-semibold text-gray-700 mb-1">
             Nama Karyawan
@@ -347,24 +376,33 @@ export default function HalamanKaryawan() {
               );
             })}
           </select>
-          {selectedId && (() => {
-            const k = daftarKaryawan.find((item) => item.id === selectedId);
-            if (!k) return null;
-            return (
-              <div className="mt-3 p-3 bg-green-50 border border-green-200 rounded-xl text-xs text-green-900 flex justify-between items-center">
-                <div>
-                  <span className="text-gray-500 block">Jam Kerja</span>
-                  <strong className="text-sm">
-                    {k.shift_masuk || '08:00'} - {k.shift_pulang || '17:00'}
-                  </strong>
+
+          {/* Info Jadwal Shift Mendatang */}
+          {selectedId && jadwalKaryawan.length > 0 && (
+            <div className="mt-3 p-3 bg-green-50 border border-green-200 rounded-xl text-xs text-green-900 space-y-1.5">
+              <p className="font-bold text-green-800">Jadwal Shift Anda:</p>
+              {jadwalKaryawan.map((j) => (
+                <div
+                  key={j.id}
+                  className="flex justify-between items-center border-t border-green-100 pt-1"
+                >
+                  <span className="font-medium">
+                    {formatTanggalSingkat(j.tanggal)}
+                    {j.tanggal === tanggalHariIni ? ' (Hari ini)' : ''}
+                  </span>
+                  {j.shift === 'Libur' ? (
+                    <span className="px-2 py-0.5 bg-red-100 text-red-700 rounded font-bold">
+                      Libur
+                    </span>
+                  ) : (
+                    <span className="font-semibold">
+                      {j.shift} ({j.jam_masuk} - {j.jam_pulang})
+                    </span>
+                  )}
                 </div>
-                <div className="text-right">
-                  <span className="text-gray-500 block">Hari Libur</span>
-                  <strong className="text-sm">{k.hari_libur || '-'}</strong>
-                </div>
-              </div>
-            );
-          })()}
+              ))}
+            </div>
+          )}
         </div>
 
         {/* TAB 1: ABSENSI */}

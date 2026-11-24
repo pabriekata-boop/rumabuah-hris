@@ -10,9 +10,6 @@ interface Karyawan {
   lokasi_toko?: string;
   pin?: string;
   gaji_pokok?: number;
-  shift_masuk?: string;
-  shift_pulang?: string;
-  hari_libur?: string;
 }
 
 interface Absensi {
@@ -24,6 +21,15 @@ interface Absensi {
   foto_masuk: string | null;
   foto_pulang: string | null;
   status_kehadiran: string;
+}
+
+interface JadwalShift {
+  id?: string;
+  karyawan_id: string;
+  tanggal: string;
+  shift: string;
+  jam_masuk: string;
+  jam_pulang: string;
 }
 
 interface Lembur {
@@ -46,13 +52,23 @@ interface Kasbon {
 
 const OWNER_PIN = '9999';
 
+const PRESET_SHIFT: Record<string, { masuk: string; pulang: string }> = {
+  Pagi: { masuk: '08:00', pulang: '17:00' },
+  Siang: { masuk: '12:00', pulang: '21:00' },
+  Full: { masuk: '08:00', pulang: '21:00' },
+  Libur: { masuk: '', pulang: '' },
+};
+
 export default function DashboardOwner() {
   const [isLoggedIn, setIsLoggedIn] = useState(false);
   const [pinInput, setPinInput] = useState('');
   const [pinError, setPinError] = useState('');
 
-  const [activeTab, setActiveTab] = useState<'absensi' | 'approval' | 'gaji' | 'karyawan'>('absensi');
+  const [activeTab, setActiveTab] = useState<
+    'absensi' | 'jadwal' | 'approval' | 'gaji' | 'karyawan'
+  >('absensi');
   const [tanggalFilter, setTanggalFilter] = useState('');
+  const [tanggalJadwal, setTanggalJadwal] = useState('');
   const [bulanFilter, setBulanFilter] = useState('');
   const [cabangFilter, setCabangFilter] = useState('Semua');
 
@@ -62,12 +78,16 @@ export default function DashboardOwner() {
   const [daftarKasbon, setDaftarKasbon] = useState<Kasbon[]>([]);
   const [loading, setLoading] = useState(false);
 
+  // State Jadwal per Tanggal
+  const [jadwalInput, setJadwalInput] = useState<
+    Record<string, { shift: string; jam_masuk: string; jam_pulang: string }>
+  >({});
+  const [savingJadwal, setSavingJadwal] = useState(false);
+  const [pesanJadwal, setPesanJadwal] = useState('');
+
   // Edit PIN & Gaji Pokok
   const [editPins, setEditPins] = useState<Record<string, string>>({});
   const [editGaji, setEditGaji] = useState<Record<string, string>>({});
-  const [editJadwal, setEditJadwal] = useState<
-    Record<string, { masuk: string; pulang: string; libur: string }>
-  >({});
   const [pesanSimpan, setPesanSimpan] = useState('');
 
   // Pengaturan Hitung Gaji
@@ -84,8 +104,10 @@ export default function DashboardOwner() {
     const now = new Date();
     const offset = now.getTimezoneOffset() * 60000;
     const localIso = new Date(now.getTime() - offset).toISOString();
-    setTanggalFilter(localIso.split('T')[0]);
-    setBulanFilter(localIso.slice(0, 7)); // YYYY-MM
+    const today = localIso.split('T')[0];
+    setTanggalFilter(today);
+    setTanggalJadwal(today);
+    setBulanFilter(localIso.slice(0, 7));
   }, []);
 
   const fetchKaryawan = useCallback(async () => {
@@ -94,19 +116,12 @@ export default function DashboardOwner() {
       setDaftarKaryawan(data);
       const pinMap: Record<string, string> = {};
       const gajiMap: Record<string, string> = {};
-      const jadwalMap: Record<string, { masuk: string; pulang: string; libur: string }> = {};
       data.forEach((k: Karyawan) => {
         pinMap[k.id] = k.pin || '1234';
         gajiMap[k.id] = String(k.gaji_pokok || 0);
-        jadwalMap[k.id] = {
-          masuk: k.shift_masuk || '08:00',
-          pulang: k.shift_pulang || '17:00',
-          libur: k.hari_libur || 'Senin',
-        };
       });
       setEditPins(pinMap);
       setEditGaji(gajiMap);
-      setEditJadwal(jadwalMap);
     }
   }, []);
 
@@ -121,6 +136,32 @@ export default function DashboardOwner() {
     if (data) setDaftarAbsensi(data);
     setLoading(false);
   }, []);
+
+  const fetchJadwalTanggal = useCallback(
+    async (tgl: string, listKaryawan: Karyawan[]) => {
+      if (!tgl || listKaryawan.length === 0) return;
+      const { data } = await supabase
+        .from('jadwal_shift')
+        .select('*')
+        .eq('tanggal', tgl);
+
+      const map: Record<string, { shift: string; jam_masuk: string; jam_pulang: string }> = {};
+      listKaryawan.forEach((k) => {
+        const found = data?.find((j: JadwalShift) => j.karyawan_id === k.id);
+        if (found) {
+          map[k.id] = {
+            shift: found.shift || 'Pagi',
+            jam_masuk: found.jam_masuk || '',
+            jam_pulang: found.jam_pulang || '',
+          };
+        } else {
+          map[k.id] = { shift: 'Pagi', jam_masuk: '08:00', jam_pulang: '17:00' };
+        }
+      });
+      setJadwalInput(map);
+    },
+    []
+  );
 
   const fetchPengajuan = useCallback(async () => {
     const [resLembur, resKasbon] = await Promise.all([
@@ -144,6 +185,12 @@ export default function DashboardOwner() {
     }
   }, [isLoggedIn, tanggalFilter, fetchAbsensi]);
 
+  useEffect(() => {
+    if (isLoggedIn && tanggalJadwal && daftarKaryawan.length > 0) {
+      fetchJadwalTanggal(tanggalJadwal, daftarKaryawan);
+    }
+  }, [isLoggedIn, tanggalJadwal, daftarKaryawan, fetchJadwalTanggal]);
+
   const handleLogin = (e: React.FormEvent) => {
     e.preventDefault();
     if (pinInput === OWNER_PIN) {
@@ -154,11 +201,50 @@ export default function DashboardOwner() {
     }
   };
 
+  const handleUbahShift = (karyawanId: string, shiftBaru: string) => {
+    const preset = PRESET_SHIFT[shiftBaru] || { masuk: '08:00', pulang: '17:00' };
+    setJadwalInput((prev) => ({
+      ...prev,
+      [karyawanId]: {
+        shift: shiftBaru,
+        jam_masuk: preset.masuk,
+        jam_pulang: preset.pulang,
+      },
+    }));
+  };
+
+  const handleSimpanJadwal = async () => {
+    if (!tanggalJadwal) return;
+    setSavingJadwal(true);
+    setPesanJadwal('');
+
+    const rows = karyawanFiltered.map((k) => {
+      const j = jadwalInput[k.id] || { shift: 'Pagi', jam_masuk: '08:00', jam_pulang: '17:00' };
+      return {
+        karyawan_id: k.id,
+        tanggal: tanggalJadwal,
+        shift: j.shift,
+        jam_masuk: j.shift === 'Libur' ? '' : j.jam_masuk,
+        jam_pulang: j.shift === 'Libur' ? '' : j.jam_pulang,
+      };
+    });
+
+    const { error } = await supabase
+      .from('jadwal_shift')
+      .upsert(rows, { onConflict: 'karyawan_id,tanggal' });
+
+    if (error) {
+      setPesanJadwal('❌ Gagal simpan jadwal: ' + error.message);
+    } else {
+      setPesanJadwal(`✅ Jadwal tanggal ${tanggalJadwal} berhasil disimpan!`);
+      setTimeout(() => setPesanJadwal(''), 3000);
+    }
+    setSavingJadwal(false);
+  };
+
   const handleUpdateKaryawan = async (karyawanId: string) => {
     const pinBaru = editPins[karyawanId]?.trim();
     const gajiBaru = Number(editGaji[karyawanId] || 0);
-    const jadwalBaru = editJadwal[karyawanId] || { masuk: '08:00', pulang: '17:00', libur: '-' };
-
     if (!pinBaru || pinBaru.length < 4) {
       setPesanSimpan('❌ PIN minimal 4 digit.');
       return;
@@ -166,19 +252,13 @@ export default function DashboardOwner() {
 
     const { error } = await supabase
       .from('karyawan')
-      .update({
-        pin: pinBaru,
-        gaji_pokok: gajiBaru,
-        shift_masuk: jadwalBaru.masuk,
-        shift_pulang: jadwalBaru.pulang,
-        hari_libur: jadwalBaru.libur,
-      })
+      .update({ pin: pinBaru, gaji_pokok: gajiBaru })
       .eq('id', karyawanId);
 
     if (error) {
       setPesanSimpan('❌ Gagal update: ' + error.message);
     } else {
-      setPesanSimpan('✅ Data & jadwal karyawan berhasil disimpan!');
+      setPesanSimpan('✅ Data karyawan berhasil disimpan!');
       fetchKaryawan();
       setTimeout(() => setPesanSimpan(''), 3000);
     }
@@ -223,7 +303,6 @@ export default function DashboardOwner() {
     return cabang.includes(cabangFilter.toLowerCase());
   });
 
-  // Hitung jumlah karyawan per cabang untuk pembagian bonus rata
   const jumlahAntapani = daftarKaryawan.filter((k) =>
     (k.cabang || k.lokasi_toko || '').toLowerCase().includes('antapani')
   ).length;
@@ -299,7 +378,7 @@ export default function DashboardOwner() {
     if (error) {
       setPesanSimpan('❌ Gagal menyimpan penggajian: ' + error.message);
     } else {
-      setPesanSimpan(`✅ Rekap penggajian bulan ${bulanFilter} berhasil disimpan ke database!`);
+      setPesanSimpan(`✅ Rekap penggajian bulan ${bulanFilter} berhasil disimpan!`);
     }
     setSavingGaji(false);
   };
@@ -350,51 +429,32 @@ export default function DashboardOwner() {
             <p className="text-sm text-gray-500">Ruma Buah HRIS — Antapani & Jatinangor</p>
           </div>
           <div className="flex flex-wrap gap-2">
-            <button
-              onClick={() => setActiveTab('absensi')}
-              className={`px-3.5 py-2 rounded-xl text-sm font-semibold transition ${
-                activeTab === 'absensi'
-                  ? 'bg-green-700 text-white'
-                  : 'bg-green-100 text-green-800 hover:bg-green-200'
-              }`}
-            >
-              Absensi
-            </button>
-            <button
-              onClick={() => setActiveTab('approval')}
-              className={`px-3.5 py-2 rounded-xl text-sm font-semibold transition flex items-center gap-1.5 ${
-                activeTab === 'approval'
-                  ? 'bg-green-700 text-white'
-                  : 'bg-green-100 text-green-800 hover:bg-green-200'
-              }`}
-            >
-              Approval
-              {pendingCount > 0 && (
-                <span className="px-1.5 py-0.5 text-xs bg-red-500 text-white rounded-full">
-                  {pendingCount}
-                </span>
-              )}
-            </button>
-            <button
-              onClick={() => setActiveTab('gaji')}
-              className={`px-3.5 py-2 rounded-xl text-sm font-semibold transition ${
-                activeTab === 'gaji'
-                  ? 'bg-green-700 text-white'
-                  : 'bg-green-100 text-green-800 hover:bg-green-200'
-              }`}
-            >
-              Penggajian
-            </button>
-            <button
-              onClick={() => setActiveTab('karyawan')}
-              className={`px-3.5 py-2 rounded-xl text-sm font-semibold transition ${
-                activeTab === 'karyawan'
-                  ? 'bg-green-700 text-white'
-                  : 'bg-green-100 text-green-800 hover:bg-green-200'
-              }`}
-            >
-              Karyawan & PIN
-            </button>
+            {(
+              [
+                { id: 'absensi', label: 'Absensi' },
+                { id: 'jadwal', label: 'Jadwal Shift' },
+                { id: 'approval', label: 'Approval' },
+                { id: 'gaji', label: 'Penggajian' },
+                { id: 'karyawan', label: 'Karyawan & PIN' },
+              ] as const
+            ).map((tab) => (
+              <button
+                key={tab.id}
+                onClick={() => setActiveTab(tab.id)}
+                className={`px-3.5 py-2 rounded-xl text-sm font-semibold transition flex items-center gap-1.5 ${
+                  activeTab === tab.id
+                    ? 'bg-green-700 text-white'
+                    : 'bg-green-100 text-green-800 hover:bg-green-200'
+                }`}
+              >
+                {tab.label}
+                {tab.id === 'approval' && pendingCount > 0 && (
+                  <span className="px-1.5 py-0.5 text-xs bg-red-500 text-white rounded-full">
+                    {pendingCount}
+                  </span>
+                )}
+              </button>
+            ))}
           </div>
         </div>
 
@@ -500,10 +560,121 @@ export default function DashboardOwner() {
           </div>
         )}
 
-        {/* TAB 2: APPROVAL LEMBUR & KASBON */}
+        {/* TAB 2: JADWAL SHIFT PER TANGGAL */}
+        {activeTab === 'jadwal' && (
+          <div className="bg-white p-5 rounded-2xl shadow-sm space-y-5">
+            <div className="flex flex-wrap gap-3 items-center justify-between">
+              <div className="flex flex-wrap gap-3 items-center">
+                <div>
+                  <span className="text-xs text-gray-500 block mb-1">Pilih Tanggal</span>
+                  <input
+                    type="date"
+                    value={tanggalJadwal}
+                    onChange={(e) => setTanggalJadwal(e.target.value)}
+                    className="p-2 border border-gray-300 rounded-xl text-sm text-gray-800"
+                  />
+                </div>
+                <div>
+                  <span className="text-xs text-gray-500 block mb-1">Filter Cabang</span>
+                  <select
+                    value={cabangFilter}
+                    onChange={(e) => setCabangFilter(e.target.value)}
+                    className="p-2 border border-gray-300 rounded-xl text-sm text-gray-800 bg-white"
+                  >
+                    <option value="Semua">Semua Cabang</option>
+                    <option value="Antapani">Antapani</option>
+                    <option value="Jatinangor">Jatinangor</option>
+                  </select>
+                </div>
+              </div>
+
+              <button
+                onClick={handleSimpanJadwal}
+                disabled={savingJadwal}
+                className="px-5 py-2.5 bg-green-700 hover:bg-green-800 text-white text-sm font-bold rounded-xl transition disabled:opacity-50"
+              >
+                {savingJadwal ? 'Menyimpan...' : 'Simpan Jadwal Tanggal Ini'}
+              </button>
+            </div>
+
+            {pesanJadwal && (
+              <p className="text-sm font-medium text-green-700">{pesanJadwal}</p>
+            )}
+
+            <div className="space-y-3">
+              {karyawanFiltered.map((k) => {
+                const nama = k.nama || k.nama_lengkap || 'Tanpa Nama';
+                const cabang = k.cabang || k.lokasi_toko || '-';
+                const j = jadwalInput[k.id] || {
+                  shift: 'Pagi',
+                  jam_masuk: '08:00',
+                  jam_pulang: '17:00',
+                };
+
+                return (
+                  <div
+                    key={k.id}
+                    className="flex flex-col md:flex-row md:items-center justify-between gap-3 p-3.5 border border-gray-100 rounded-xl bg-gray-50"
+                  >
+                    <div>
+                      <p className="font-semibold text-gray-800">{nama}</p>
+                      <p className="text-xs text-gray-500">{cabang}</p>
+                    </div>
+
+                    <div className="flex flex-wrap items-center gap-2">
+                      <select
+                        value={j.shift}
+                        onChange={(e) => handleUbahShift(k.id, e.target.value)}
+                        className={`p-2 border rounded-lg text-sm font-semibold ${
+                          j.shift === 'Libur'
+                            ? 'bg-red-50 border-red-200 text-red-700'
+                            : 'bg-white border-gray-300 text-gray-800'
+                        }`}
+                      >
+                        <option value="Pagi">Shift Pagi</option>
+                        <option value="Siang">Shift Siang</option>
+                        <option value="Full">Shift Full</option>
+                        <option value="Libur">Libur</option>
+                      </select>
+
+                      {j.shift !== 'Libur' && (
+                        <>
+                          <input
+                            type="time"
+                            value={j.jam_masuk}
+                            onChange={(e) =>
+                              setJadwalInput((prev) => ({
+                                ...prev,
+                                [k.id]: { ...prev[k.id], jam_masuk: e.target.value },
+                              }))
+                            }
+                            className="p-2 border border-gray-300 rounded-lg text-sm bg-white"
+                          />
+                          <span className="text-gray-400 text-xs">s/d</span>
+                          <input
+                            type="time"
+                            value={j.jam_pulang}
+                            onChange={(e) =>
+                              setJadwalInput((prev) => ({
+                                ...prev,
+                                [k.id]: { ...prev[k.id], jam_pulang: e.target.value },
+                              }))
+                            }
+                            className="p-2 border border-gray-300 rounded-lg text-sm bg-white"
+                          />
+                        </>
+                      )}
+                    </div>
+                  </div>
+                );
+              })}
+            </div>
+          </div>
+        )}
+
+        {/* TAB 3: APPROVAL LEMBUR & KASBON */}
         {activeTab === 'approval' && (
           <div className="grid grid-cols-1 md:grid-cols-2 gap-6">
-            {/* Daftar Lembur */}
             <div className="bg-white p-5 rounded-2xl shadow-sm">
               <div className="flex justify-between items-center mb-4">
                 <h2 className="text-lg font-bold text-gray-800">Pengajuan Lembur</h2>
@@ -560,7 +731,6 @@ export default function DashboardOwner() {
               )}
             </div>
 
-            {/* Daftar Kasbon */}
             <div className="bg-white p-5 rounded-2xl shadow-sm">
               <div className="flex justify-between items-center mb-4">
                 <h2 className="text-lg font-bold text-gray-800">Pengajuan Kasbon</h2>
@@ -619,7 +789,7 @@ export default function DashboardOwner() {
           </div>
         )}
 
-        {/* TAB 3: PENGGAJIAN & BONUS RATA PER CABANG */}
+        {/* TAB 4: PENGGAJIAN & BONUS RATA PER CABANG */}
         {activeTab === 'gaji' && (
           <div className="bg-white p-5 rounded-2xl shadow-sm space-y-5">
             <div className="grid grid-cols-1 sm:grid-cols-4 gap-3 bg-green-50 p-4 rounded-xl">
@@ -737,7 +907,7 @@ export default function DashboardOwner() {
           </div>
         )}
 
-        {/* TAB 4: KELOLA KARYAWAN, PIN & GAJI POKOK */}
+        {/* TAB 5: KELOLA KARYAWAN, PIN & GAJI POKOK */}
         {activeTab === 'karyawan' && (
           <div className="bg-white p-5 rounded-2xl shadow-sm">
             <h2 className="text-lg font-bold text-gray-800 mb-4">Atur PIN & Gaji Pokok Karyawan</h2>
@@ -751,15 +921,15 @@ export default function DashboardOwner() {
                 return (
                   <div
                     key={k.id}
-                    className="flex flex-col md:flex-row md:items-center justify-between gap-3 p-3 border border-gray-100 rounded-xl bg-gray-50"
+                    className="flex flex-col md:flex-row md:items-center justify-between gap-3 p-3.5 border border-gray-100 rounded-xl bg-gray-50"
                   >
                     <div>
                       <p className="font-semibold text-gray-800">{nama}</p>
                       <p className="text-xs text-gray-500">{cabang}</p>
                     </div>
-                    <div className="flex flex-wrap items-center gap-2">
+                    <div className="flex flex-wrap items-end gap-2">
                       <div>
-                        <span className="text-xs text-gray-500 block">Gaji Pokok (Rp)</span>
+                        <span className="text-xs text-gray-500 block mb-1">Gaji Pokok (Rp)</span>
                         <input
                           type="number"
                           step="50000"
@@ -771,7 +941,7 @@ export default function DashboardOwner() {
                         />
                       </div>
                       <div>
-                        <span className="text-xs text-gray-500 block">PIN</span>
+                        <span className="text-xs text-gray-500 block mb-1">PIN</span>
                         <input
                           type="text"
                           maxLength={6}
@@ -784,50 +954,8 @@ export default function DashboardOwner() {
                       </div>
                       <button
                         onClick={() => handleUpdateKaryawan(k.id)}
-                        className="mt-4 px-4 py-2 bg-green-600 hover:bg-green-700 text-white text-sm font-semibold rounded-lg"
-                      ><div>
-                        <span className="text-xs text-gray-500 block">Masuk</span>
-                        <input
-                          type="time"
-                          value={editJadwal[k.id]?.masuk || '08:00'}
-                          onChange={(e) =>
-                            setEditJadwal({
-                              ...editJadwal,
-                              [k.id]: { ...editJadwal[k.id], masuk: e.target.value },
-                            })
-                          }
-                          className="p-2 border border-gray-300 rounded-lg text-sm bg-white"
-                        />
-                      </div>
-                      <div>
-                        <span className="text-xs text-gray-500 block">Pulang</span>
-                        <input
-                          type="time"
-                          value={editJadwal[k.id]?.pulang || '17:00'}
-                          onChange={(e) =>
-                            setEditJadwal({
-                              ...editJadwal,
-                              [k.id]: { ...editJadwal[k.id], pulang: e.target.value },
-                            })
-                          }
-                          className="p-2 border border-gray-300 rounded-lg text-sm bg-white"
-                        />
-                      </div>
-                      <div>
-                        <span className="text-xs text-gray-500 block">Libur</span>
-                        <input
-                          type="text"
-                          placeholder="Misal: Senin"
-                          value={editJadwal[k.id]?.libur || ''}
-                          onChange={(e) =>
-                            setEditJadwal({
-                              ...editJadwal,
-                              [k.id]: { ...editJadwal[k.id], libur: e.target.value },
-                            })
-                          }
-                          className="w-24 p-2 border border-gray-300 rounded-lg text-sm bg-white"
-                        />
-                      </div>
+                        className="px-4 py-2 bg-green-600 hover:bg-green-700 text-white text-sm font-semibold rounded-lg"
+                      >
                         Simpan
                       </button>
                     </div>
