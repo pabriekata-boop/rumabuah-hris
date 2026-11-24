@@ -1043,7 +1043,7 @@ export default function DashboardAdmin() {
                         }`}
                       >
                         <option value="Pagi">Shift Pagi (07:00 - 16:15)</option>
-                        <option value="Middle">Shift Middle (10:00 - 16:15)</option>
+                        <option value="Middle">Shift Middle (10:00 - 19:15)</option>
                         <option value="Siang">Shift Siang (12:00 - 21:15)</option>
                         <option value="Full">Shift Full (07:00 - 21:15)</option>
                         <option value="Libur">Libur</option>
