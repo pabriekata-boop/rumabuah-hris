@@ -88,7 +88,7 @@ const OWNER_PIN = '9999';
 
 const PRESET_SHIFT: Record<string, { masuk: string; pulang: string }> = {
   Pagi: { masuk: '07:00', pulang: '16:15' },
-  Middle: { masuk: '10:00', pulang: '16:15' },
+  Middle: { masuk: '10:00', pulang: '19:15' },
   Siang: { masuk: '12:00', pulang: '21:15' },
   Full: { masuk: '07:00', pulang: '21:15' },
   Libur: { masuk: '', pulang: '' },
