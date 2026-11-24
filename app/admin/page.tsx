@@ -11,6 +11,8 @@ interface Karyawan {
   pin?: string;
   gaji_pokok?: number;
   role?: string;
+  no_wa?: string;
+  tanggal_lahir?: string;
 }
 
 interface Absensi {
@@ -143,12 +145,16 @@ export default function DashboardAdmin() {
   const [roleBaru, setRoleBaru] = useState('staf');
   const [gajiBaruInput, setGajiBaruInput] = useState('');
   const [pinBaruInput, setPinBaruInput] = useState('');
+  const [noWaBaru, setNoWaBaru] = useState('');
+  const [tglLahirBaru, setTglLahirBaru] = useState('');
   const [addingKaryawan, setAddingKaryawan] = useState(false);
 
   // Edit PIN, Gaji Pokok & Role
   const [editPins, setEditPins] = useState<Record<string, string>>({});
   const [editGaji, setEditGaji] = useState<Record<string, string>>({});
   const [editRoles, setEditRoles] = useState<Record<string, string>>({});
+  const [editNoWa, setEditNoWa] = useState<Record<string, string>>({});
+  const [editTglLahir, setEditTglLahir] = useState<Record<string, string>>({});
   const [pesanSimpan, setPesanSimpan] = useState('');
 
   // Pengaturan Hitung Gaji & Deteksi Telat
@@ -180,6 +186,8 @@ export default function DashboardAdmin() {
       const pinMap: Record<string, string> = {};
       const gajiMap: Record<string, string> = {};
       const roleMap: Record<string, string> = {};
+      const waMap: Record<string, string> = {};
+      const tglLahirMap: Record<string, string> = {};
       data.forEach((k: Karyawan) => {
         pinMap[k.id] = k.pin || '1234';
         gajiMap[k.id] = String(k.gaji_pokok || 0);
@@ -188,6 +196,8 @@ export default function DashboardAdmin() {
       setEditPins(pinMap);
       setEditGaji(gajiMap);
       setEditRoles(roleMap);
+      setEditNoWa(waMap);
+      setEditTglLahir(tglLahirMap)
     }
   }, []);
 
@@ -355,6 +365,8 @@ export default function DashboardAdmin() {
       role: roleBaru,
       gaji_pokok: Number(gajiBaruInput || 0),
       pin: pinClean,
+      no_wa: noWaBaru.trim() || null,
+      tanggal_lahir: tglLahirBaru || null,
     };
 
     const { error } = await supabase.from('karyawan').insert([payload]);
@@ -439,9 +451,15 @@ export default function DashboardAdmin() {
     }
 
     const { error } = await supabase
-      .from('karyawan')
-      .update({ pin: pinBaru, gaji_pokok: gajiBaru, role: roleEdit })
-      .eq('id', karyawanId);
+   .from('karyawan')
+   .update({
+     pin: pinBaru,
+     gaji_pokok: gajiBaru,
+     role: roleEdit,
+     no_wa: editNoWa[karyawanId]?.trim() || null,
+     tanggal_lahir: editTglLahir[karyawanId] || null,
+   })
+   .eq('id', karyawanId);
 
     if (error) {
       setPesanSimpan('❌ Gagal update: ' + error.message);
@@ -1528,6 +1546,25 @@ export default function DashboardAdmin() {
                   />
                 </div>
                 <div>
+               <label className="text-xs text-gray-500 block mb-1">No. WA</label>
+               <input
+                 type="tel"
+                 placeholder="081234567890"
+                 value={noWaBaru}
+                 onChange={(e) => setNoWaBaru(e.target.value)}
+                 className="w-full p-2 border border-gray-300 rounded-lg text-sm"
+               />
+             </div>
+             <div>
+               <label className="text-xs text-gray-500 block mb-1">Tanggal Lahir</label>
+               <input
+                 type="date"
+                 value={tglLahirBaru}
+                 onChange={(e) => setTglLahirBaru(e.target.value)}
+                 className="w-full p-2 border border-gray-300 rounded-lg text-sm bg-white"
+               />
+             </div>
+                <div>
                   <label className="text-xs text-gray-500 block mb-1">Cabang</label>
                   <select
                     value={cabangBaru}
@@ -1641,6 +1678,29 @@ export default function DashboardAdmin() {
                             className="w-20 p-2 border border-gray-300 rounded-lg text-center text-sm font-mono bg-white"
                           />
                         </div>
+                        <div>
+                       <span className="text-xs text-gray-500 block mb-1">No. WA</span>
+                       <input
+                         type="tel"
+                         placeholder="08..."
+                         value={editNoWa[k.id] || ''}
+                         onChange={(e) =>
+                           setEditNoWa({ ...editNoWa, [k.id]: e.target.value })
+                         }
+                         className="w-32 p-2 border border-gray-300 rounded-lg text-sm bg-white"
+                       />
+                     </div>
+                     <div>
+                       <span className="text-xs text-gray-500 block mb-1">Tgl Lahir</span>
+                       <input
+                         type="date"
+                         value={editTglLahir[k.id] || ''}
+                         onChange={(e) =>
+                           setEditTglLahir({ ...editTglLahir, [k.id]: e.target.value })
+                         }
+                         className="p-2 border border-gray-300 rounded-lg text-sm bg-white"
+                       />
+                     </div>
                         <button
                           onClick={() => handleUpdateKaryawan(k.id)}
                           className="px-3.5 py-2 bg-green-600 hover:bg-green-700 text-white text-sm font-semibold rounded-lg"
