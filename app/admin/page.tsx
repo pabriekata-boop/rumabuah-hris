@@ -10,6 +10,7 @@ interface Karyawan {
   lokasi_toko?: string;
   pin?: string;
   gaji_pokok?: number;
+  role?: string;
 }
 
 interface Absensi {
@@ -39,6 +40,7 @@ interface Lembur {
   durasi_jam: number;
   alasan: string;
   status: string;
+  disetujui_oleh?: string | null;
 }
 
 interface Kasbon {
@@ -48,6 +50,13 @@ interface Kasbon {
   nominal: number;
   keperluan: string;
   status: string;
+  disetujui_oleh?: string | null;
+}
+
+interface CurrentUser {
+  role: 'owner' | 'manajer';
+  id: string;
+  nama: string;
 }
 
 const OWNER_PIN = '9999';
@@ -59,10 +68,11 @@ const PRESET_SHIFT: Record<string, { masuk: string; pulang: string }> = {
   Libur: { masuk: '', pulang: '' },
 };
 
-export default function DashboardOwner() {
-  const [isLoggedIn, setIsLoggedIn] = useState(false);
+export default function DashboardAdmin() {
+  const [currentUser, setCurrentUser] = useState<CurrentUser | null>(null);
   const [pinInput, setPinInput] = useState('');
   const [pinError, setPinError] = useState('');
+  const [loginLoading, setLoginLoading] = useState(false);
 
   const [activeTab, setActiveTab] = useState<
     'absensi' | 'jadwal' | 'approval' | 'gaji' | 'karyawan'
@@ -85,9 +95,10 @@ export default function DashboardOwner() {
   const [savingJadwal, setSavingJadwal] = useState(false);
   const [pesanJadwal, setPesanJadwal] = useState('');
 
-  // Edit PIN & Gaji Pokok
+  // Edit PIN, Gaji Pokok & Role
   const [editPins, setEditPins] = useState<Record<string, string>>({});
   const [editGaji, setEditGaji] = useState<Record<string, string>>({});
+  const [editRoles, setEditRoles] = useState<Record<string, string>>({});
   const [pesanSimpan, setPesanSimpan] = useState('');
 
   // Pengaturan Hitung Gaji
@@ -116,12 +127,15 @@ export default function DashboardOwner() {
       setDaftarKaryawan(data);
       const pinMap: Record<string, string> = {};
       const gajiMap: Record<string, string> = {};
+      const roleMap: Record<string, string> = {};
       data.forEach((k: Karyawan) => {
         pinMap[k.id] = k.pin || '1234';
         gajiMap[k.id] = String(k.gaji_pokok || 0);
+        roleMap[k.id] = k.role || 'staf';
       });
       setEditPins(pinMap);
       setEditGaji(gajiMap);
+      setEditRoles(roleMap);
     }
   }, []);
 
@@ -173,32 +187,67 @@ export default function DashboardOwner() {
   }, []);
 
   useEffect(() => {
-    if (isLoggedIn) {
+    if (currentUser) {
       fetchKaryawan();
       fetchPengajuan();
     }
-  }, [isLoggedIn, fetchKaryawan, fetchPengajuan]);
+  }, [currentUser, fetchKaryawan, fetchPengajuan]);
 
   useEffect(() => {
-    if (isLoggedIn && tanggalFilter) {
+    if (currentUser && tanggalFilter) {
       fetchAbsensi(tanggalFilter);
     }
-  }, [isLoggedIn, tanggalFilter, fetchAbsensi]);
+  }, [currentUser, tanggalFilter, fetchAbsensi]);
 
   useEffect(() => {
-    if (isLoggedIn && tanggalJadwal && daftarKaryawan.length > 0) {
+    if (currentUser && tanggalJadwal && daftarKaryawan.length > 0) {
       fetchJadwalTanggal(tanggalJadwal, daftarKaryawan);
     }
-  }, [isLoggedIn, tanggalJadwal, daftarKaryawan, fetchJadwalTanggal]);
+  }, [currentUser, tanggalJadwal, daftarKaryawan, fetchJadwalTanggal]);
 
-  const handleLogin = (e: React.FormEvent) => {
+  // Login Owner atau Manajer
+  const handleLogin = async (e: React.FormEvent) => {
     e.preventDefault();
-    if (pinInput === OWNER_PIN) {
-      setIsLoggedIn(true);
-      setPinError('');
-    } else {
-      setPinError('PIN Owner salah.');
+    setPinError('');
+    const pin = pinInput.trim();
+
+    if (pin === OWNER_PIN) {
+      setCurrentUser({ role: 'owner', id: 'owner', nama: 'Owner' });
+      setPinInput('');
+      return;
     }
+
+    setLoginLoading(true);
+    const { data, error } = await supabase
+      .from('karyawan')
+      .select('*')
+      .eq('role', 'manajer')
+      .eq('pin', pin)
+      .maybeSingle();
+    setLoginLoading(false);
+
+    if (error) {
+      setPinError('Gagal mengecek PIN: ' + error.message);
+      return;
+    }
+
+    if (data) {
+      setCurrentUser({
+        role: 'manajer',
+        id: data.id,
+        nama: data.nama || data.nama_lengkap || 'Manajer',
+      });
+      setActiveTab('approval');
+      setPinInput('');
+    } else {
+      setPinError('PIN salah atau akun tidak memiliki akses admin/manajer.');
+    }
+  };
+
+  const handleLogout = () => {
+    setCurrentUser(null);
+    setActiveTab('absensi');
+    setPinInput('');
   };
 
   const handleUbahShift = (karyawanId: string, shiftBaru: string) => {
@@ -218,7 +267,7 @@ export default function DashboardOwner() {
     setSavingJadwal(true);
     setPesanJadwal('');
 
-    const rows = karyawanFiltered.map((k) => {
+    const rows = stafUntukJadwal.map((k) => {
       const j = jadwalInput[k.id] || { shift: 'Pagi', jam_masuk: '08:00', jam_pulang: '17:00' };
       return {
         karyawan_id: k.id,
@@ -245,6 +294,8 @@ export default function DashboardOwner() {
   const handleUpdateKaryawan = async (karyawanId: string) => {
     const pinBaru = editPins[karyawanId]?.trim();
     const gajiBaru = Number(editGaji[karyawanId] || 0);
+    const roleBaru = editRoles[karyawanId] || 'staf';
+
     if (!pinBaru || pinBaru.length < 4) {
       setPesanSimpan('❌ PIN minimal 4 digit.');
       return;
@@ -252,7 +303,7 @@ export default function DashboardOwner() {
 
     const { error } = await supabase
       .from('karyawan')
-      .update({ pin: pinBaru, gaji_pokok: gajiBaru })
+      .update({ pin: pinBaru, gaji_pokok: gajiBaru, role: roleBaru })
       .eq('id', karyawanId);
 
     if (error) {
@@ -265,12 +316,24 @@ export default function DashboardOwner() {
   };
 
   const handleStatusLembur = async (id: string, statusBaru: 'Approved' | 'Rejected') => {
-    await supabase.from('lembur').update({ status: statusBaru }).eq('id', id);
+    await supabase
+      .from('lembur')
+      .update({
+        status: statusBaru,
+        disetujui_oleh: currentUser?.nama || 'Admin',
+      })
+      .eq('id', id);
     fetchPengajuan();
   };
 
   const handleStatusKasbon = async (id: string, statusBaru: 'Approved' | 'Rejected') => {
-    await supabase.from('kasbon').update({ status: statusBaru }).eq('id', id);
+    await supabase
+      .from('kasbon')
+      .update({
+        status: statusBaru,
+        disetujui_oleh: currentUser?.nama || 'Admin',
+      })
+      .eq('id', id);
     fetchPengajuan();
   };
 
@@ -302,6 +365,9 @@ export default function DashboardOwner() {
     const cabang = (k.cabang || k.lokasi_toko || '').toLowerCase();
     return cabang.includes(cabangFilter.toLowerCase());
   });
+
+  // Khusus Jadwal Shift: kecualikan Manajer karena manajer tidak ikut shift
+  const stafUntukJadwal = karyawanFiltered.filter((k) => k.role !== 'manajer');
 
   const jumlahAntapani = daftarKaryawan.filter((k) =>
     (k.cabang || k.lokasi_toko || '').toLowerCase().includes('antapani')
@@ -387,20 +453,21 @@ export default function DashboardOwner() {
     daftarLembur.filter((l) => l.status === 'Pending').length +
     daftarKasbon.filter((k) => k.status === 'Pending').length;
 
-  if (!isLoggedIn) {
+  // Tampilan Login
+  if (!currentUser) {
     return (
       <div className="min-h-screen bg-green-50 flex items-center justify-center p-4">
         <form
           onSubmit={handleLogin}
           className="bg-white p-8 rounded-2xl shadow-lg max-w-sm w-full text-center border-t-4 border-green-700"
         >
-          <h1 className="text-2xl font-bold text-green-800 mb-1">Owner HRIS</h1>
-          <p className="text-sm text-gray-500 mb-6">Ruma Buah Antapani & Jatinangor</p>
+          <h1 className="text-2xl font-bold text-green-800 mb-1">Admin Ruma Buah</h1>
+          <p className="text-sm text-gray-500 mb-6">Login Owner atau Manajer</p>
 
           <input
             type="password"
             inputMode="numeric"
-            placeholder="Masukkan PIN Owner"
+            placeholder="Masukkan PIN"
             value={pinInput}
             onChange={(e) => setPinInput(e.target.value)}
             className="w-full p-3 border border-gray-300 rounded-xl text-center text-lg tracking-widest mb-4 focus:outline-none focus:ring-2 focus:ring-green-600"
@@ -410,14 +477,31 @@ export default function DashboardOwner() {
 
           <button
             type="submit"
-            className="w-full bg-green-700 hover:bg-green-800 text-white font-bold py-3 rounded-xl transition"
+            disabled={loginLoading}
+            className="w-full bg-green-700 hover:bg-green-800 text-white font-bold py-3 rounded-xl transition disabled:opacity-50"
           >
-            Masuk Dashboard
+            {loginLoading ? 'Mengecek...' : 'Masuk Dashboard'}
           </button>
         </form>
       </div>
     );
   }
+
+  const isOwner = currentUser.role === 'owner';
+
+  const tabsTersedia = isOwner
+    ? ([
+        { id: 'absensi', label: 'Absensi' },
+        { id: 'jadwal', label: 'Jadwal Shift' },
+        { id: 'approval', label: 'Approval' },
+        { id: 'gaji', label: 'Penggajian' },
+        { id: 'karyawan', label: 'Karyawan & PIN' },
+      ] as const)
+    : ([
+        { id: 'absensi', label: 'Absensi' },
+        { id: 'jadwal', label: 'Jadwal Shift' },
+        { id: 'approval', label: 'Approval' },
+      ] as const);
 
   return (
     <div className="min-h-screen bg-green-50 p-4 md:p-8">
@@ -425,19 +509,18 @@ export default function DashboardOwner() {
         {/* Header & Navigasi */}
         <div className="bg-white p-5 rounded-2xl shadow-sm border-t-4 border-green-700 mb-6 flex flex-col md:flex-row md:items-center md:justify-between gap-4">
           <div>
-            <h1 className="text-2xl font-bold text-green-800">Dashboard Owner</h1>
+            <div className="flex items-center gap-2">
+              <h1 className="text-2xl font-bold text-green-800">
+                {isOwner ? 'Dashboard Owner' : 'Dashboard Manajer'}
+              </h1>
+              <span className="text-xs px-2.5 py-0.5 rounded-full bg-green-100 text-green-800 font-semibold">
+                {currentUser.nama}
+              </span>
+            </div>
             <p className="text-sm text-gray-500">Ruma Buah HRIS — Antapani & Jatinangor</p>
           </div>
-          <div className="flex flex-wrap gap-2">
-            {(
-              [
-                { id: 'absensi', label: 'Absensi' },
-                { id: 'jadwal', label: 'Jadwal Shift' },
-                { id: 'approval', label: 'Approval' },
-                { id: 'gaji', label: 'Penggajian' },
-                { id: 'karyawan', label: 'Karyawan & PIN' },
-              ] as const
-            ).map((tab) => (
+          <div className="flex flex-wrap items-center gap-2">
+            {tabsTersedia.map((tab) => (
               <button
                 key={tab.id}
                 onClick={() => setActiveTab(tab.id)}
@@ -455,6 +538,12 @@ export default function DashboardOwner() {
                 )}
               </button>
             ))}
+            <button
+              onClick={handleLogout}
+              className="px-3 py-2 rounded-xl text-sm font-semibold bg-gray-100 text-gray-600 hover:bg-gray-200"
+            >
+              Keluar
+            </button>
           </div>
         </div>
 
@@ -509,7 +598,14 @@ export default function DashboardOwner() {
 
                       return (
                         <tr key={k.id} className="border-b border-gray-100 hover:bg-green-50/50">
-                          <td className="py-3 px-2 font-semibold text-gray-800">{nama}</td>
+                          <td className="py-3 px-2 font-semibold text-gray-800">
+                            {nama}
+                            {k.role === 'manajer' && (
+                              <span className="ml-2 text-xs px-1.5 py-0.5 bg-blue-100 text-blue-700 rounded">
+                                Manajer
+                              </span>
+                            )}
+                          </td>
                           <td className="py-3 px-2 text-gray-600">{cabang}</td>
                           <td className="py-3 px-2">
                             {absen?.jam_masuk ? (
@@ -560,7 +656,7 @@ export default function DashboardOwner() {
           </div>
         )}
 
-        {/* TAB 2: JADWAL SHIFT PER TANGGAL */}
+        {/* TAB 2: JADWAL SHIFT PER TANGGAL (Manajer tidak ikut jadwal shift) */}
         {activeTab === 'jadwal' && (
           <div className="bg-white p-5 rounded-2xl shadow-sm space-y-5">
             <div className="flex flex-wrap gap-3 items-center justify-between">
@@ -602,7 +698,7 @@ export default function DashboardOwner() {
             )}
 
             <div className="space-y-3">
-              {karyawanFiltered.map((k) => {
+              {stafUntukJadwal.map((k) => {
                 const nama = k.nama || k.nama_lengkap || 'Tanpa Nama';
                 const cabang = k.cabang || k.lokasi_toko || '-';
                 const j = jadwalInput[k.id] || {
@@ -689,44 +785,59 @@ export default function DashboardOwner() {
                 <p className="text-sm text-gray-400 py-4">Belum ada pengajuan lembur.</p>
               ) : (
                 <div className="space-y-3">
-                  {daftarLembur.map((l) => (
-                    <div key={l.id} className="p-3 border border-gray-100 rounded-xl bg-gray-50 text-sm">
-                      <div className="flex justify-between items-start mb-1">
-                        <span className="font-bold text-gray-800">{getNamaKaryawan(l.karyawan_id)}</span>
-                        <span
-                          className={`text-xs px-2 py-0.5 rounded-full font-semibold ${
-                            l.status === 'Approved'
-                              ? 'bg-green-100 text-green-800'
-                              : l.status === 'Rejected'
-                              ? 'bg-red-100 text-red-700'
-                              : 'bg-amber-100 text-amber-800'
-                          }`}
-                        >
-                          {l.status}
-                        </span>
-                      </div>
-                      <p className="text-xs text-gray-500">
-                        {l.tanggal} • <strong>{l.durasi_jam} jam</strong>
-                      </p>
-                      <p className="text-gray-700 mt-1">{l.alasan}</p>
-                      {l.status === 'Pending' && (
-                        <div className="flex gap-2 mt-3">
-                          <button
-                            onClick={() => handleStatusLembur(l.id, 'Approved')}
-                            className="flex-1 py-1.5 bg-green-600 hover:bg-green-700 text-white rounded-lg text-xs font-bold"
+                  {daftarLembur.map((l) => {
+                    const isSelfRequest =
+                      currentUser.role === 'manajer' && l.karyawan_id === currentUser.id;
+
+                    return (
+                      <div key={l.id} className="p-3 border border-gray-100 rounded-xl bg-gray-50 text-sm">
+                        <div className="flex justify-between items-start mb-1">
+                          <span className="font-bold text-gray-800">{getNamaKaryawan(l.karyawan_id)}</span>
+                          <span
+                            className={`text-xs px-2 py-0.5 rounded-full font-semibold ${
+                              l.status === 'Approved'
+                                ? 'bg-green-100 text-green-800'
+                                : l.status === 'Rejected'
+                                ? 'bg-red-100 text-red-700'
+                                : 'bg-amber-100 text-amber-800'
+                            }`}
                           >
-                            Setujui
-                          </button>
-                          <button
-                            onClick={() => handleStatusLembur(l.id, 'Rejected')}
-                            className="flex-1 py-1.5 bg-red-100 hover:bg-red-200 text-red-700 rounded-lg text-xs font-bold"
-                          >
-                            Tolak
-                          </button>
+                            {l.status}
+                          </span>
                         </div>
-                      )}
-                    </div>
-                  ))}
+                        <p className="text-xs text-gray-500">
+                          {l.tanggal} • <strong>{l.durasi_jam} jam</strong>
+                        </p>
+                        <p className="text-gray-700 mt-1">{l.alasan}</p>
+                        {l.disetujui_oleh && (
+                          <p className="text-xs text-gray-400 mt-1">
+                            Diproses oleh: {l.disetujui_oleh}
+                          </p>
+                        )}
+                        {l.status === 'Pending' &&
+                          (isSelfRequest ? (
+                            <p className="mt-2 text-xs italic text-amber-700">
+                              Pengajuan pribadi hanya bisa disetujui oleh Owner.
+                            </p>
+                          ) : (
+                            <div className="flex gap-2 mt-3">
+                              <button
+                                onClick={() => handleStatusLembur(l.id, 'Approved')}
+                                className="flex-1 py-1.5 bg-green-600 hover:bg-green-700 text-white rounded-lg text-xs font-bold"
+                              >
+                                Setujui
+                              </button>
+                              <button
+                                onClick={() => handleStatusLembur(l.id, 'Rejected')}
+                                className="flex-1 py-1.5 bg-red-100 hover:bg-red-200 text-red-700 rounded-lg text-xs font-bold"
+                              >
+                                Tolak
+                              </button>
+                            </div>
+                          ))}
+                      </div>
+                    );
+                  })}
                 </div>
               )}
             </div>
@@ -745,52 +856,67 @@ export default function DashboardOwner() {
                 <p className="text-sm text-gray-400 py-4">Belum ada pengajuan kasbon.</p>
               ) : (
                 <div className="space-y-3">
-                  {daftarKasbon.map((ks) => (
-                    <div key={ks.id} className="p-3 border border-gray-100 rounded-xl bg-gray-50 text-sm">
-                      <div className="flex justify-between items-start mb-1">
-                        <span className="font-bold text-gray-800">{getNamaKaryawan(ks.karyawan_id)}</span>
-                        <span
-                          className={`text-xs px-2 py-0.5 rounded-full font-semibold ${
-                            ks.status === 'Approved'
-                              ? 'bg-green-100 text-green-800'
-                              : ks.status === 'Rejected'
-                              ? 'bg-red-100 text-red-700'
-                              : 'bg-amber-100 text-amber-800'
-                          }`}
-                        >
-                          {ks.status}
-                        </span>
-                      </div>
-                      <p className="text-xs text-gray-500">
-                        {ks.tanggal} • <strong className="text-green-800">{formatRp(ks.nominal)}</strong>
-                      </p>
-                      <p className="text-gray-700 mt-1">{ks.keperluan}</p>
-                      {ks.status === 'Pending' && (
-                        <div className="flex gap-2 mt-3">
-                          <button
-                            onClick={() => handleStatusKasbon(ks.id, 'Approved')}
-                            className="flex-1 py-1.5 bg-green-600 hover:bg-green-700 text-white rounded-lg text-xs font-bold"
+                  {daftarKasbon.map((ks) => {
+                    const isSelfRequest =
+                      currentUser.role === 'manajer' && ks.karyawan_id === currentUser.id;
+
+                    return (
+                      <div key={ks.id} className="p-3 border border-gray-100 rounded-xl bg-gray-50 text-sm">
+                        <div className="flex justify-between items-start mb-1">
+                          <span className="font-bold text-gray-800">{getNamaKaryawan(ks.karyawan_id)}</span>
+                          <span
+                            className={`text-xs px-2 py-0.5 rounded-full font-semibold ${
+                              ks.status === 'Approved'
+                                ? 'bg-green-100 text-green-800'
+                                : ks.status === 'Rejected'
+                                ? 'bg-red-100 text-red-700'
+                                : 'bg-amber-100 text-amber-800'
+                            }`}
                           >
-                            Setujui
-                          </button>
-                          <button
-                            onClick={() => handleStatusKasbon(ks.id, 'Rejected')}
-                            className="flex-1 py-1.5 bg-red-100 hover:bg-red-200 text-red-700 rounded-lg text-xs font-bold"
-                          >
-                            Tolak
-                          </button>
+                            {ks.status}
+                          </span>
                         </div>
-                      )}
-                    </div>
-                  ))}
+                        <p className="text-xs text-gray-500">
+                          {ks.tanggal} • <strong className="text-green-800">{formatRp(ks.nominal)}</strong>
+                        </p>
+                        <p className="text-gray-700 mt-1">{ks.keperluan}</p>
+                        {ks.disetujui_oleh && (
+                          <p className="text-xs text-gray-400 mt-1">
+                            Diproses oleh: {ks.disetujui_oleh}
+                          </p>
+                        )}
+                        {ks.status === 'Pending' &&
+                          (isSelfRequest ? (
+                            <p className="mt-2 text-xs italic text-amber-700">
+                              Pengajuan pribadi hanya bisa disetujui oleh Owner.
+                            </p>
+                          ) : (
+                            <div className="flex gap-2 mt-3">
+                              <button
+                                onClick={() => handleStatusKasbon(ks.id, 'Approved')}
+                                className="flex-1 py-1.5 bg-green-600 hover:bg-green-700 text-white rounded-lg text-xs font-bold"
+                              >
+                                Setujui
+                              </button>
+                              <button
+                                onClick={() => handleStatusKasbon(ks.id, 'Rejected')}
+                                className="flex-1 py-1.5 bg-red-100 hover:bg-red-200 text-red-700 rounded-lg text-xs font-bold"
+                              >
+                                Tolak
+                              </button>
+                            </div>
+                          ))}
+                      </div>
+                    );
+                  })}
                 </div>
               )}
             </div>
           </div>
         )}
 
-        {/* TAB 4: PENGGAJIAN & BONUS RATA PER CABANG */}
-        {activeTab === 'gaji' && (
+        {/* TAB 4: PENGGAJIAN (Khusus Owner) */}
+        {isOwner && activeTab === 'gaji' && (
           <div className="bg-white p-5 rounded-2xl shadow-sm space-y-5">
             <div className="grid grid-cols-1 sm:grid-cols-4 gap-3 bg-green-50 p-4 rounded-xl">
               <div>
@@ -907,10 +1033,12 @@ export default function DashboardOwner() {
           </div>
         )}
 
-        {/* TAB 5: KELOLA KARYAWAN, PIN & GAJI POKOK */}
-        {activeTab === 'karyawan' && (
+        {/* TAB 5: KELOLA KARYAWAN, ROLE, PIN & GAJI POKOK (Khusus Owner) */}
+        {isOwner && activeTab === 'karyawan' && (
           <div className="bg-white p-5 rounded-2xl shadow-sm">
-            <h2 className="text-lg font-bold text-gray-800 mb-4">Atur PIN & Gaji Pokok Karyawan</h2>
+            <h2 className="text-lg font-bold text-gray-800 mb-4">
+              Atur Role, PIN & Gaji Pokok Karyawan
+            </h2>
             {pesanSimpan && (
               <p className="mb-4 text-sm font-medium text-green-700">{pesanSimpan}</p>
             )}
@@ -928,6 +1056,19 @@ export default function DashboardOwner() {
                       <p className="text-xs text-gray-500">{cabang}</p>
                     </div>
                     <div className="flex flex-wrap items-end gap-2">
+                      <div>
+                        <span className="text-xs text-gray-500 block mb-1">Role</span>
+                        <select
+                          value={editRoles[k.id] || 'staf'}
+                          onChange={(e) =>
+                            setEditRoles({ ...editRoles, [k.id]: e.target.value })
+                          }
+                          className="p-2 border border-gray-300 rounded-lg text-sm bg-white"
+                        >
+                          <option value="staf">Staf</option>
+                          <option value="manajer">Manajer</option>
+                        </select>
+                      </div>
                       <div>
                         <span className="text-xs text-gray-500 block mb-1">Gaji Pokok (Rp)</span>
                         <input
