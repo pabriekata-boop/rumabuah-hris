@@ -85,9 +85,10 @@ interface CurrentUser {
 const OWNER_PIN = '9999';
 
 const PRESET_SHIFT: Record<string, { masuk: string; pulang: string }> = {
-  Pagi: { masuk: '08:00', pulang: '17:00' },
-  Siang: { masuk: '12:00', pulang: '21:00' },
-  Full: { masuk: '08:00', pulang: '21:00' },
+  Pagi: { masuk: '07:00', pulang: '16:15' },
+  Middle: { masuk: '10:00', pulang: '16:15' },
+  Siang: { masuk: '12:00', pulang: '21:15' },
+  Full: { masuk: '07:00', pulang: '21:15' },
   Libur: { masuk: '', pulang: '' },
 };
 
@@ -981,9 +982,10 @@ export default function DashboardAdmin() {
                             : 'bg-white border-gray-300 text-gray-800'
                         }`}
                       >
-                        <option value="Pagi">Shift Pagi</option>
-                        <option value="Siang">Shift Siang</option>
-                        <option value="Full">Shift Full</option>
+                        <option value="Pagi">Shift Pagi (07:00 - 16:15)</option>
+                        <option value="Middle">Shift Middle (10:00 - 16:15)</option>
+                        <option value="Siang">Shift Siang (12:00 - 21:15)</option>
+                        <option value="Full">Shift Full (07:00 - 21:15)</option>
                         <option value="Libur">Libur</option>
                       </select>
 
