@@ -109,6 +109,8 @@ export default function DashboardAdmin() {
   const [daftarAbsensi, setDaftarAbsensi] = useState<Absensi[]>([]);
   const [daftarLembur, setDaftarLembur] = useState<Lembur[]>([]);
   const [daftarKasbon, setDaftarKasbon] = useState<Kasbon[]>([]);
+  const [daftarIzin, setDaftarIzin] = useState<IzinSakit[]>([]);
+  const [riwayatGaji, setRiwayatGaji] = useState<PenggajianRecord[]>([]);
   const [loading, setLoading] = useState(false);
 
   // State Jadwal per Tanggal
@@ -138,7 +140,6 @@ export default function DashboardAdmin() {
   const [bonusJatinangor, setBonusJatinangor] = useState('0');
   const [potonganTelat, setPotonganTelat] = useState<Record<string, string>>({});
   const [savingGaji, setSavingGaji] = useState(false);
-  const [riwayatGaji, setRiwayatGaji] = useState<PenggajianRecord[]>([]);
 
   // Modal lihat foto
   const [fotoModal, setFotoModal] = useState<string | null>(null);
@@ -300,10 +301,11 @@ export default function DashboardAdmin() {
     setAddingKaryawan(true);
     setPesanSimpan('');
 
-    // Deteksi otomatis nama kolom di tabel karyawan Supabase Anda
     const sample = daftarKaryawan[0];
-    const kolomNama = sample && 'nama_lengkap' in sample && !('nama' in sample) ? 'nama_lengkap' : 'nama';
-    const kolomCabang = sample && 'lokasi_toko' in sample && !('cabang' in sample) ? 'lokasi_toko' : 'cabang';
+    const kolomNama =
+      sample && 'nama_lengkap' in sample && !('nama' in sample) ? 'nama_lengkap' : 'nama';
+    const kolomCabang =
+      sample && 'lokasi_toko' in sample && !('cabang' in sample) ? 'lokasi_toko' : 'cabang';
 
     const payload: Record<string, unknown> = {
       [kolomNama]: namaBaru.trim(),
@@ -509,7 +511,7 @@ export default function DashboardAdmin() {
           ks.tanggal?.startsWith(bulanFilter)
       )
       .reduce((acc, cur) => acc + Number(cur.nominal || 0), 0);
-    const [daftarIzin, setDaftarIzin] = useState<IzinSakit[]>([]);  
+
     const dendaTelat = Number(potonganTelat[k.id] || 0);
     const totalGaji = gajiPokok + bonus + uangLembur - totalKasbon - dendaTelat;
 
@@ -529,7 +531,6 @@ export default function DashboardAdmin() {
     setSavingGaji(true);
     setPesanSimpan('');
 
-    // Hapus data bulan yang sama dulu agar tidak dobel saat disimpan ulang
     await supabase.from('penggajian').delete().eq('bulan', bulanFilter);
 
     const rows = daftarKaryawan.map((k) => {
@@ -556,7 +557,6 @@ export default function DashboardAdmin() {
     setSavingGaji(false);
   };
 
-  // Hitung rekap total gaji per bulan dari database
   const rekapPerBulan = Object.values(
     riwayatGaji.reduce(
       (acc, row) => {
@@ -741,11 +741,11 @@ export default function DashboardAdmin() {
                     {karyawanFiltered.map((k) => {
                       const absen = daftarAbsensi.find((a) => a.karyawan_id === k.id);
                       const izinHariIni = daftarIzin.find(
-                     (i) =>
-                       i.karyawan_id === k.id &&
-                       i.tanggal === tanggalFilter &&
-                       i.status === 'Approved'
-                   );
+                        (i) =>
+                          i.karyawan_id === k.id &&
+                          i.tanggal === tanggalFilter &&
+                          i.status === 'Approved'
+                      );
                       const nama = k.nama || k.nama_lengkap || 'Tanpa Nama';
                       const cabang = k.cabang || k.lokasi_toko || '-';
 
@@ -765,18 +765,12 @@ export default function DashboardAdmin() {
                               <span className="px-2 py-1 bg-green-100 text-green-800 rounded-lg font-medium">
                                 {formatJam(absen.jam_masuk)}
                               </span>
+                            ) : izinHariIni ? (
+                              <span className="px-2 py-1 bg-blue-100 text-blue-800 rounded-lg font-medium">
+                                {izinHariIni.jenis}
+                              </span>
                             ) : (
-                              {absen?.jam_masuk ? (
-                           <span className="px-2 py-1 bg-green-100 text-green-800 rounded-lg font-medium">
-                             {formatJam(absen.jam_masuk)}
-                           </span>
-                         ) : izinHariIni ? (
-                           <span className="px-2 py-1 bg-blue-100 text-blue-800 rounded-lg font-medium">
-                             {izinHariIni.jenis}
-                           </span>
-                         ) : (
-                           <span className="text-gray-400">Belum absen</span>
-                         )}
+                              <span className="text-gray-400">Belum absen</span>
                             )}
                           </td>
                           <td className="py-3 px-2">
@@ -931,12 +925,13 @@ export default function DashboardAdmin() {
           </div>
         )}
 
-        {/* TAB 3: APPROVAL LEMBUR & KASBON */}
+        {/* TAB 3: APPROVAL LEMBUR, KASBON & IZIN/SAKIT */}
         {activeTab === 'approval' && (
-          <div className="grid grid-cols-1 md:grid-cols-2 gap-6">
+          <div className="grid grid-cols-1 lg:grid-cols-3 gap-6">
+            {/* Lembur */}
             <div className="bg-white p-5 rounded-2xl shadow-sm">
               <div className="flex justify-between items-center mb-4">
-                <h2 className="text-lg font-bold text-gray-800">Pengajuan Lembur</h2>
+                <h2 className="text-lg font-bold text-gray-800">Lembur</h2>
                 <button
                   onClick={fetchPengajuan}
                   className="text-xs px-3 py-1 bg-green-100 text-green-800 rounded-lg font-semibold"
@@ -1003,91 +998,12 @@ export default function DashboardAdmin() {
                   })}
                 </div>
               )}
+            </div>
 
-              {/* Daftar Izin / Sakit */}
-         <div className="bg-white p-5 rounded-2xl shadow-sm">
-           <div className="flex justify-between items-center mb-4">
-             <h2 className="text-lg font-bold text-gray-800">Izin / Sakit</h2>
-             <button
-               onClick={fetchPengajuan}
-               className="text-xs px-3 py-1 bg-green-100 text-green-800 rounded-lg font-semibold"
-             >
-               Refresh
-             </button>
-           </div>
-           {daftarIzin.length === 0 ? (
-             <p className="text-sm text-gray-400 py-4">Belum ada pengajuan izin/sakit.</p>
-           ) : (
-             <div className="space-y-3">
-               {daftarIzin.map((iz) => {
-                 const isSelfRequest =
-                   currentUser.role === 'manajer' && iz.karyawan_id === currentUser.id;
-
-                 return (
-                   <div key={iz.id} className="p-3 border border-gray-100 rounded-xl bg-gray-50 text-sm">
-                     <div className="flex justify-between items-start mb-1">
-                       <span className="font-bold text-gray-800">{getNamaKaryawan(iz.karyawan_id)}</span>
-                       <span
-                         className={`text-xs px-2 py-0.5 rounded-full font-semibold ${
-                           iz.status === 'Approved'
-                             ? 'bg-green-100 text-green-800'
-                             : iz.status === 'Rejected'
-                             ? 'bg-red-100 text-red-700'
-                             : 'bg-amber-100 text-amber-800'
-                         }`}
-                       >
-                         {iz.status}
-                       </span>
-                     </div>
-                     <p className="text-xs text-gray-500">
-                       {iz.tanggal} • <strong className="text-blue-700">{iz.jenis}</strong>
-                     </p>
-                     <p className="text-gray-700 mt-1">{iz.alasan}</p>
-                     {iz.foto_bukti && (
-                       <button
-                         onClick={() => setFotoModal(iz.foto_bukti || null)}
-                         className="mt-2 text-xs px-2.5 py-1 bg-blue-100 text-blue-700 rounded-lg hover:bg-blue-200 font-semibold"
-                       >
-                         Lihat Foto Bukti
-                       </button>
-                     )}
-                     {iz.disetujui_oleh && (
-                       <p className="text-xs text-gray-400 mt-1">
-                         Diproses oleh: {iz.disetujui_oleh}
-                       </p>
-                     )}
-                     {iz.status === 'Pending' &&
-                       (isSelfRequest ? (
-                         <p className="mt-2 text-xs italic text-amber-700">
-                           Pengajuan pribadi hanya bisa disetujui oleh Owner.
-                         </p>
-                       ) : (
-                         <div className="flex gap-2 mt-3">
-                           <button
-                             onClick={() => handleStatusIzin(iz.id, 'Approved')}
-                             className="flex-1 py-1.5 bg-green-600 hover:bg-green-700 text-white rounded-lg text-xs font-bold"
-                           >
-                             Setujui
-                           </button>
-                           <button
-                             onClick={() => handleStatusIzin(iz.id, 'Rejected')}
-                             className="flex-1 py-1.5 bg-red-100 hover:bg-red-200 text-red-700 rounded-lg text-xs font-bold"
-                           >
-                             Tolak
-                           </button>
-                         </div>
-                       ))}
-                   </div>
-                 );
-               })}
-             </div>
-           )}
-         </div>
-
-
+            {/* Kasbon */}
             <div className="bg-white p-5 rounded-2xl shadow-sm">
               <div className="flex justify-between items-center mb-4">
-                <h2 className="text-lg font-bold text-gray-800">Pengajuan Kasbon</h2>
+                <h2 className="text-lg font-bold text-gray-800">Kasbon</h2>
                 <button
                   onClick={fetchPengajuan}
                   className="text-xs px-3 py-1 bg-green-100 text-green-800 rounded-lg font-semibold"
@@ -1143,6 +1059,86 @@ export default function DashboardAdmin() {
                               </button>
                               <button
                                 onClick={() => handleStatusKasbon(ks.id, 'Rejected')}
+                                className="flex-1 py-1.5 bg-red-100 hover:bg-red-200 text-red-700 rounded-lg text-xs font-bold"
+                              >
+                                Tolak
+                              </button>
+                            </div>
+                          ))}
+                      </div>
+                    );
+                  })}
+                </div>
+              )}
+            </div>
+
+            {/* Izin / Sakit */}
+            <div className="bg-white p-5 rounded-2xl shadow-sm">
+              <div className="flex justify-between items-center mb-4">
+                <h2 className="text-lg font-bold text-gray-800">Izin / Sakit</h2>
+                <button
+                  onClick={fetchPengajuan}
+                  className="text-xs px-3 py-1 bg-green-100 text-green-800 rounded-lg font-semibold"
+                >
+                  Refresh
+                </button>
+              </div>
+              {daftarIzin.length === 0 ? (
+                <p className="text-sm text-gray-400 py-4">Belum ada pengajuan izin/sakit.</p>
+              ) : (
+                <div className="space-y-3">
+                  {daftarIzin.map((iz) => {
+                    const isSelfRequest =
+                      currentUser.role === 'manajer' && iz.karyawan_id === currentUser.id;
+
+                    return (
+                      <div key={iz.id} className="p-3 border border-gray-100 rounded-xl bg-gray-50 text-sm">
+                        <div className="flex justify-between items-start mb-1">
+                          <span className="font-bold text-gray-800">{getNamaKaryawan(iz.karyawan_id)}</span>
+                          <span
+                            className={`text-xs px-2 py-0.5 rounded-full font-semibold ${
+                              iz.status === 'Approved'
+                                ? 'bg-green-100 text-green-800'
+                                : iz.status === 'Rejected'
+                                ? 'bg-red-100 text-red-700'
+                                : 'bg-amber-100 text-amber-800'
+                            }`}
+                          >
+                            {iz.status}
+                          </span>
+                        </div>
+                        <p className="text-xs text-gray-500">
+                          {iz.tanggal} • <strong className="text-blue-700">{iz.jenis}</strong>
+                        </p>
+                        <p className="text-gray-700 mt-1">{iz.alasan}</p>
+                        {iz.foto_bukti && (
+                          <button
+                            onClick={() => setFotoModal(iz.foto_bukti || null)}
+                            className="mt-2 text-xs px-2.5 py-1 bg-blue-100 text-blue-700 rounded-lg hover:bg-blue-200 font-semibold"
+                          >
+                            Lihat Foto Bukti
+                          </button>
+                        )}
+                        {iz.disetujui_oleh && (
+                          <p className="text-xs text-gray-400 mt-1">
+                            Diproses oleh: {iz.disetujui_oleh}
+                          </p>
+                        )}
+                        {iz.status === 'Pending' &&
+                          (isSelfRequest ? (
+                            <p className="mt-2 text-xs italic text-amber-700">
+                              Pengajuan pribadi hanya bisa disetujui oleh Owner.
+                            </p>
+                          ) : (
+                            <div className="flex gap-2 mt-3">
+                              <button
+                                onClick={() => handleStatusIzin(iz.id, 'Approved')}
+                                className="flex-1 py-1.5 bg-green-600 hover:bg-green-700 text-white rounded-lg text-xs font-bold"
+                              >
+                                Setujui
+                              </button>
+                              <button
+                                onClick={() => handleStatusIzin(iz.id, 'Rejected')}
                                 className="flex-1 py-1.5 bg-red-100 hover:bg-red-200 text-red-700 rounded-lg text-xs font-bold"
                               >
                                 Tolak
@@ -1260,18 +1256,9 @@ export default function DashboardAdmin() {
                         return (
                           <tr key={k.id} className="border-b border-gray-100">
                             <td className="py-3 px-2">
-                            {absen?.jam_masuk ? (
-                              <span className="px-2 py-1 bg-green-100 text-green-800 rounded-lg font-medium">
-                                {formatJam(absen.jam_masuk)}
-                              </span>
-                            ) : izinHariIni ? (
-                              <span className="px-2 py-1 bg-blue-100 text-blue-800 rounded-lg font-medium">
-                                {izinHariIni.jenis}
-                              </span>
-                            ) : (
-                              <span className="text-gray-400">Belum absen</span>
-                            )}
-                          </td>
+                              <div className="font-semibold text-gray-800">{nama}</div>
+                              <div className="text-xs text-gray-400">{cabang}</div>
+                            </td>
                             <td className="py-3 px-2">{formatRp(slip.gajiPokok)}</td>
                             <td className="py-3 px-2 text-green-700">+{formatRp(slip.bonus)}</td>
                             <td className="py-3 px-2 text-green-700">
@@ -1389,7 +1376,6 @@ export default function DashboardAdmin() {
         {/* TAB 5: TAMBAH & KELOLA KARYAWAN (Khusus Owner) */}
         {isOwner && activeTab === 'karyawan' && (
           <div className="space-y-6">
-            {/* Form Tambah Karyawan Baru */}
             <form
               onSubmit={handleTambahKaryawan}
               className="bg-white p-5 rounded-2xl shadow-sm border border-green-100"
@@ -1462,7 +1448,6 @@ export default function DashboardAdmin() {
               </div>
             </form>
 
-            {/* Daftar Karyawan */}
             <div className="bg-white p-5 rounded-2xl shadow-sm">
               <h2 className="text-lg font-bold text-gray-800 mb-4">
                 Daftar Karyawan ({daftarKaryawan.length} orang)
