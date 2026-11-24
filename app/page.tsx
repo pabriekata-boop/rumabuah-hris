@@ -3,12 +3,17 @@ import { useState, useEffect } from 'react';
 import { supabase } from '../lib/supabase';
 
 interface Karyawan {
+  interface Karyawan {
   id: string;
   nama?: string;
   nama_lengkap?: string;
   cabang?: string;
   lokasi_toko?: string;
   pin?: string;
+  shift_masuk?: string;
+  shift_pulang?: string;
+  hari_libur?: string;
+}
 }
 
 interface AbsensiHariIni {
@@ -344,6 +349,24 @@ export default function HalamanKaryawan() {
               );
             })}
           </select>
+          {selectedId && (() => {
+            const k = daftarKaryawan.find((item) => item.id === selectedId);
+            if (!k) return null;
+            return (
+              <div className="mt-3 p-3 bg-green-50 border border-green-200 rounded-xl text-xs text-green-900 flex justify-between items-center">
+                <div>
+                  <span className="text-gray-500 block">Jam Kerja</span>
+                  <strong className="text-sm">
+                    {k.shift_masuk || '08:00'} - {k.shift_pulang || '17:00'}
+                  </strong>
+                </div>
+                <div className="text-right">
+                  <span className="text-gray-500 block">Hari Libur</span>
+                  <strong className="text-sm">{k.hari_libur || '-'}</strong>
+                </div>
+              </div>
+            );
+          })()}
         </div>
 
         {/* TAB 1: ABSENSI */}

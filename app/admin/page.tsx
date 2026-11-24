@@ -10,6 +10,9 @@ interface Karyawan {
   lokasi_toko?: string;
   pin?: string;
   gaji_pokok?: number;
+  shift_masuk?: string;
+  shift_pulang?: string;
+  hari_libur?: string;
 }
 
 interface Absensi {
@@ -62,6 +65,9 @@ export default function DashboardOwner() {
   // Edit PIN & Gaji Pokok
   const [editPins, setEditPins] = useState<Record<string, string>>({});
   const [editGaji, setEditGaji] = useState<Record<string, string>>({});
+  const [editJadwal, setEditJadwal] = useState<
+    Record<string, { masuk: string; pulang: string; libur: string }>
+  >({});
   const [pesanSimpan, setPesanSimpan] = useState('');
 
   // Pengaturan Hitung Gaji
@@ -88,12 +94,19 @@ export default function DashboardOwner() {
       setDaftarKaryawan(data);
       const pinMap: Record<string, string> = {};
       const gajiMap: Record<string, string> = {};
+      const jadwalMap: Record<string, { masuk: string; pulang: string; libur: string }> = {};
       data.forEach((k: Karyawan) => {
         pinMap[k.id] = k.pin || '1234';
         gajiMap[k.id] = String(k.gaji_pokok || 0);
+        jadwalMap[k.id] = {
+          masuk: k.shift_masuk || '08:00',
+          pulang: k.shift_pulang || '17:00',
+          libur: k.hari_libur || 'Senin',
+        };
       });
       setEditPins(pinMap);
       setEditGaji(gajiMap);
+      setEditJadwal(jadwalMap);
     }
   }, []);
 
@@ -144,6 +157,8 @@ export default function DashboardOwner() {
   const handleUpdateKaryawan = async (karyawanId: string) => {
     const pinBaru = editPins[karyawanId]?.trim();
     const gajiBaru = Number(editGaji[karyawanId] || 0);
+    const jadwalBaru = editJadwal[karyawanId] || { masuk: '08:00', pulang: '17:00', libur: '-' };
+
     if (!pinBaru || pinBaru.length < 4) {
       setPesanSimpan('❌ PIN minimal 4 digit.');
       return;
@@ -151,13 +166,19 @@ export default function DashboardOwner() {
 
     const { error } = await supabase
       .from('karyawan')
-      .update({ pin: pinBaru, gaji_pokok: gajiBaru })
+      .update({
+        pin: pinBaru,
+        gaji_pokok: gajiBaru,
+        shift_masuk: jadwalBaru.masuk,
+        shift_pulang: jadwalBaru.pulang,
+        hari_libur: jadwalBaru.libur,
+      })
       .eq('id', karyawanId);
 
     if (error) {
       setPesanSimpan('❌ Gagal update: ' + error.message);
     } else {
-      setPesanSimpan('✅ Data karyawan berhasil disimpan!');
+      setPesanSimpan('✅ Data & jadwal karyawan berhasil disimpan!');
       fetchKaryawan();
       setTimeout(() => setPesanSimpan(''), 3000);
     }
@@ -764,7 +785,49 @@ export default function DashboardOwner() {
                       <button
                         onClick={() => handleUpdateKaryawan(k.id)}
                         className="mt-4 px-4 py-2 bg-green-600 hover:bg-green-700 text-white text-sm font-semibold rounded-lg"
-                      >
+                      ><div>
+                        <span className="text-xs text-gray-500 block">Masuk</span>
+                        <input
+                          type="time"
+                          value={editJadwal[k.id]?.masuk || '08:00'}
+                          onChange={(e) =>
+                            setEditJadwal({
+                              ...editJadwal,
+                              [k.id]: { ...editJadwal[k.id], masuk: e.target.value },
+                            })
+                          }
+                          className="p-2 border border-gray-300 rounded-lg text-sm bg-white"
+                        />
+                      </div>
+                      <div>
+                        <span className="text-xs text-gray-500 block">Pulang</span>
+                        <input
+                          type="time"
+                          value={editJadwal[k.id]?.pulang || '17:00'}
+                          onChange={(e) =>
+                            setEditJadwal({
+                              ...editJadwal,
+                              [k.id]: { ...editJadwal[k.id], pulang: e.target.value },
+                            })
+                          }
+                          className="p-2 border border-gray-300 rounded-lg text-sm bg-white"
+                        />
+                      </div>
+                      <div>
+                        <span className="text-xs text-gray-500 block">Libur</span>
+                        <input
+                          type="text"
+                          placeholder="Misal: Senin"
+                          value={editJadwal[k.id]?.libur || ''}
+                          onChange={(e) =>
+                            setEditJadwal({
+                              ...editJadwal,
+                              [k.id]: { ...editJadwal[k.id], libur: e.target.value },
+                            })
+                          }
+                          className="w-24 p-2 border border-gray-300 rounded-lg text-sm bg-white"
+                        />
+                      </div>
                         Simpan
                       </button>
                     </div>
