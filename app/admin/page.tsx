@@ -91,6 +91,19 @@ const PRESET_SHIFT: Record<string, { masuk: string; pulang: string }> = {
   Libur: { masuk: '', pulang: '' },
 };
 
+// Hitung selisih menit keterlambatan antara jam_masuk absen (ISO) dan jam_masuk jadwal ("HH:MM")
+function hitungMenitTelat(jamAbsenIso: string | null, jamJadwal: string | null): number {
+  if (!jamAbsenIso || !jamJadwal || !jamJadwal.includes(':')) return 0;
+  const [jamJ, menitJ] = jamJadwal.split(':').map(Number);
+  if (Number.isNaN(jamJ) || Number.isNaN(menitJ)) return 0;
+
+  const absenDate = new Date(jamAbsenIso);
+  const absenMenit = absenDate.getHours() * 60 + absenDate.getMinutes();
+  const jadwalMenit = jamJ * 60 + menitJ;
+
+  return Math.max(0, absenMenit - jadwalMenit);
+}
+
 export default function DashboardAdmin() {
   const [currentUser, setCurrentUser] = useState<CurrentUser | null>(null);
   const [pinInput, setPinInput] = useState('');
@@ -107,6 +120,9 @@ export default function DashboardAdmin() {
 
   const [daftarKaryawan, setDaftarKaryawan] = useState<Karyawan[]>([]);
   const [daftarAbsensi, setDaftarAbsensi] = useState<Absensi[]>([]);
+  const [jadwalHarian, setJadwalHarian] = useState<JadwalShift[]>([]);
+  const [absensiBulanan, setAbsensiBulanan] = useState<Absensi[]>([]);
+  const [jadwalBulanan, setJadwalBulanan] = useState<JadwalShift[]>([]);
   const [daftarLembur, setDaftarLembur] = useState<Lembur[]>([]);
   const [daftarKasbon, setDaftarKasbon] = useState<Kasbon[]>([]);
   const [daftarIzin, setDaftarIzin] = useState<IzinSakit[]>([]);
@@ -134,11 +150,13 @@ export default function DashboardAdmin() {
   const [editRoles, setEditRoles] = useState<Record<string, string>>({});
   const [pesanSimpan, setPesanSimpan] = useState('');
 
-  // Pengaturan Hitung Gaji
+  // Pengaturan Hitung Gaji & Deteksi Telat
   const [tarifLemburPerJam, setTarifLemburPerJam] = useState('15000');
+  const [toleransiTelatMenit, setToleransiTelatMenit] = useState('10');
+  const [dendaPerTelat, setDendaPerTelat] = useState('10000');
   const [bonusAntapani, setBonusAntapani] = useState('0');
   const [bonusJatinangor, setBonusJatinangor] = useState('0');
-  const [potonganTelat, setPotonganTelat] = useState<Record<string, string>>({});
+  const [potonganTelatManual, setPotonganTelatManual] = useState<Record<string, string>>({});
   const [savingGaji, setSavingGaji] = useState(false);
 
   // Modal lihat foto
@@ -175,13 +193,29 @@ export default function DashboardAdmin() {
   const fetchAbsensi = useCallback(async (tgl: string) => {
     if (!tgl) return;
     setLoading(true);
-    const { data } = await supabase
-      .from('absensi')
-      .select('*')
-      .eq('tanggal', tgl)
-      .order('jam_masuk', { ascending: true });
-    if (data) setDaftarAbsensi(data);
+    const [resAbsen, resJadwal] = await Promise.all([
+      supabase
+        .from('absensi')
+        .select('*')
+        .eq('tanggal', tgl)
+        .order('jam_masuk', { ascending: true }),
+      supabase.from('jadwal_shift').select('*').eq('tanggal', tgl),
+    ]);
+    if (resAbsen.data) setDaftarAbsensi(resAbsen.data);
+    if (resJadwal.data) setJadwalHarian(resJadwal.data);
     setLoading(false);
+  }, []);
+
+  const fetchDataBulanan = useCallback(async (bln: string) => {
+    if (!bln) return;
+    const start = `${bln}-01`;
+    const end = `${bln}-31`;
+    const [resAbsen, resJadwal] = await Promise.all([
+      supabase.from('absensi').select('*').gte('tanggal', start).lte('tanggal', end),
+      supabase.from('jadwal_shift').select('*').gte('tanggal', start).lte('tanggal', end),
+    ]);
+    if (resAbsen.data) setAbsensiBulanan(resAbsen.data);
+    if (resJadwal.data) setJadwalBulanan(resJadwal.data);
   }, []);
 
   const fetchJadwalTanggal = useCallback(
@@ -235,6 +269,13 @@ export default function DashboardAdmin() {
       fetchAbsensi(tanggalFilter);
     }
   }, [currentUser, tanggalFilter, fetchAbsensi]);
+
+  useEffect(() => {
+    if (currentUser && bulanFilter) {
+      fetchDataBulanan(bulanFilter);
+      setPotonganTelatManual({});
+    }
+  }, [currentUser, bulanFilter, fetchDataBulanan]);
 
   useEffect(() => {
     if (currentUser && tanggalJadwal && daftarKaryawan.length > 0) {
@@ -481,6 +522,8 @@ export default function DashboardAdmin() {
     (k.cabang || k.lokasi_toko || '').toLowerCase().includes('jatinangor')
   ).length;
 
+  const toleransiAngka = Number(toleransiTelatMenit || 0);
+
   const hitungSlipKaryawan = (k: Karyawan) => {
     const cabang = (k.cabang || k.lokasi_toko || '').toLowerCase();
     const gajiPokok = k.gaji_pokok || 0;
@@ -512,7 +555,28 @@ export default function DashboardAdmin() {
       )
       .reduce((acc, cur) => acc + Number(cur.nominal || 0), 0);
 
-    const dendaTelat = Number(potonganTelat[k.id] || 0);
+    // Hitung jumlah telat otomatis dalam bulan ini (kecuali Manajer)
+    let jumlahTelat = 0;
+    if (k.role !== 'manajer') {
+      const absenKaryawan = absensiBulanan.filter((a) => a.karyawan_id === k.id);
+      absenKaryawan.forEach((a) => {
+        const jadwal = jadwalBulanan.find(
+          (j) => j.karyawan_id === k.id && j.tanggal === a.tanggal && j.shift !== 'Libur'
+        );
+        if (jadwal?.jam_masuk) {
+          const menitTelat = hitungMenitTelat(a.jam_masuk, jadwal.jam_masuk);
+          if (menitTelat > toleransiAngka) {
+            jumlahTelat += 1;
+          }
+        }
+      });
+    }
+
+    const dendaOtomatis = jumlahTelat * Number(dendaPerTelat || 0);
+    const hasManualOverride =
+      potonganTelatManual[k.id] !== undefined && potonganTelatManual[k.id] !== '';
+    const dendaTelat = hasManualOverride ? Number(potonganTelatManual[k.id]) : dendaOtomatis;
+
     const totalGaji = gajiPokok + bonus + uangLembur - totalKasbon - dendaTelat;
 
     return {
@@ -521,6 +585,8 @@ export default function DashboardAdmin() {
       totalJamLembur,
       uangLembur,
       totalKasbon,
+      jumlahTelat,
+      dendaOtomatis,
       dendaTelat,
       totalGaji,
     };
@@ -732,6 +798,7 @@ export default function DashboardAdmin() {
                     <tr className="border-b border-gray-200 text-gray-600">
                       <th className="py-3 px-2">Karyawan</th>
                       <th className="py-3 px-2">Cabang</th>
+                      <th className="py-3 px-2">Jadwal</th>
                       <th className="py-3 px-2">Masuk</th>
                       <th className="py-3 px-2">Pulang</th>
                       <th className="py-3 px-2">Foto</th>
@@ -740,6 +807,7 @@ export default function DashboardAdmin() {
                   <tbody>
                     {karyawanFiltered.map((k) => {
                       const absen = daftarAbsensi.find((a) => a.karyawan_id === k.id);
+                      const jadwal = jadwalHarian.find((j) => j.karyawan_id === k.id);
                       const izinHariIni = daftarIzin.find(
                         (i) =>
                           i.karyawan_id === k.id &&
@@ -748,6 +816,12 @@ export default function DashboardAdmin() {
                       );
                       const nama = k.nama || k.nama_lengkap || 'Tanpa Nama';
                       const cabang = k.cabang || k.lokasi_toko || '-';
+
+                      const menitTelat =
+                        k.role !== 'manajer' && jadwal && jadwal.shift !== 'Libur'
+                          ? hitungMenitTelat(absen?.jam_masuk || null, jadwal.jam_masuk)
+                          : 0;
+                      const isTelat = menitTelat > toleransiAngka;
 
                       return (
                         <tr key={k.id} className="border-b border-gray-100 hover:bg-green-50/50">
@@ -760,11 +834,33 @@ export default function DashboardAdmin() {
                             )}
                           </td>
                           <td className="py-3 px-2 text-gray-600">{cabang}</td>
+                          <td className="py-3 px-2 text-xs text-gray-500">
+                            {k.role === 'manajer'
+                              ? 'Fleksibel'
+                              : jadwal
+                              ? jadwal.shift === 'Libur'
+                                ? 'Libur'
+                                : `${jadwal.shift} (${jadwal.jam_masuk})`
+                              : '-'}
+                          </td>
                           <td className="py-3 px-2">
                             {absen?.jam_masuk ? (
-                              <span className="px-2 py-1 bg-green-100 text-green-800 rounded-lg font-medium">
-                                {formatJam(absen.jam_masuk)}
-                              </span>
+                              <div className="flex flex-wrap items-center gap-1.5">
+                                <span
+                                  className={`px-2 py-1 rounded-lg font-medium ${
+                                    isTelat
+                                      ? 'bg-red-100 text-red-700'
+                                      : 'bg-green-100 text-green-800'
+                                  }`}
+                                >
+                                  {formatJam(absen.jam_masuk)}
+                                </span>
+                                {isTelat && (
+                                  <span className="text-xs font-bold text-red-600">
+                                    Telat {menitTelat}m
+                                  </span>
+                                )}
+                              </div>
                             ) : izinHariIni ? (
                               <span className="px-2 py-1 bg-blue-100 text-blue-800 rounded-lg font-medium">
                                 {izinHariIni.jenis}
@@ -1190,7 +1286,7 @@ export default function DashboardAdmin() {
 
               {/* Kalkulator & Tabel Gaji Bulan Dipilih */}
               <div className="bg-white p-5 rounded-2xl shadow-sm space-y-5">
-                <div className="grid grid-cols-1 sm:grid-cols-4 gap-3 bg-green-50 p-4 rounded-xl">
+                <div className="grid grid-cols-1 sm:grid-cols-3 lg:grid-cols-6 gap-3 bg-green-50 p-4 rounded-xl">
                   <div>
                     <label className="block text-xs font-semibold text-gray-600 mb-1">Bulan Gaji</label>
                     <input
@@ -1202,7 +1298,7 @@ export default function DashboardAdmin() {
                   </div>
                   <div>
                     <label className="block text-xs font-semibold text-gray-600 mb-1">
-                      Tarif Lembur / Jam (Rp)
+                      Lembur / Jam (Rp)
                     </label>
                     <input
                       type="number"
@@ -1213,7 +1309,32 @@ export default function DashboardAdmin() {
                   </div>
                   <div>
                     <label className="block text-xs font-semibold text-gray-600 mb-1">
-                      Total Bonus Antapani ({jumlahAntapani} org)
+                      Toleransi (Menit)
+                    </label>
+                    <input
+                      type="number"
+                      min="0"
+                      value={toleransiTelatMenit}
+                      onChange={(e) => setToleransiTelatMenit(e.target.value)}
+                      className="w-full p-2 border border-gray-300 rounded-lg text-sm bg-white"
+                    />
+                  </div>
+                  <div>
+                    <label className="block text-xs font-semibold text-gray-600 mb-1">
+                      Denda / Telat (Rp)
+                    </label>
+                    <input
+                      type="number"
+                      step="5000"
+                      min="0"
+                      value={dendaPerTelat}
+                      onChange={(e) => setDendaPerTelat(e.target.value)}
+                      className="w-full p-2 border border-gray-300 rounded-lg text-sm bg-white"
+                    />
+                  </div>
+                  <div>
+                    <label className="block text-xs font-semibold text-gray-600 mb-1">
+                      Bonus Antapani ({jumlahAntapani})
                     </label>
                     <input
                       type="number"
@@ -1224,7 +1345,7 @@ export default function DashboardAdmin() {
                   </div>
                   <div>
                     <label className="block text-xs font-semibold text-gray-600 mb-1">
-                      Total Bonus Jatinangor ({jumlahJatinangor} org)
+                      Bonus Jatinangor ({jumlahJatinangor})
                     </label>
                     <input
                       type="number"
@@ -1271,13 +1392,24 @@ export default function DashboardAdmin() {
                                 type="number"
                                 min="0"
                                 step="5000"
-                                placeholder="0"
-                                value={potonganTelat[k.id] || ''}
+                                value={
+                                  potonganTelatManual[k.id] !== undefined
+                                    ? potonganTelatManual[k.id]
+                                    : String(slip.dendaOtomatis)
+                                }
                                 onChange={(e) =>
-                                  setPotonganTelat({ ...potonganTelat, [k.id]: e.target.value })
+                                  setPotonganTelatManual({
+                                    ...potonganTelatManual,
+                                    [k.id]: e.target.value,
+                                  })
                                 }
                                 className="w-24 p-1.5 border border-gray-300 rounded-lg text-sm"
                               />
+                              <span className="block text-xs text-gray-400 mt-0.5">
+                                {slip.jumlahTelat > 0
+                                  ? `${slip.jumlahTelat}x telat otomatis`
+                                  : '0x telat'}
+                              </span>
                             </td>
                             <td className="py-3 px-2 text-right font-bold text-green-800">
                               {formatRp(slip.totalGaji)}
