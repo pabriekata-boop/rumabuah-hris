@@ -28,7 +28,6 @@ interface JadwalShift {
   jam_pulang: string;
 }
 
-// Koordinat Toko Ruma Buah & Batas Radius (Meter)
 const LOKASI_TOKO = {
   antapani: {
     nama: 'Ruma Buah Antapani',
@@ -44,9 +43,8 @@ const LOKASI_TOKO = {
 
 const RADIUS_MAKSIMAL_METER = 50;
 
-// Rumus Haversine untuk menghitung jarak antar 2 titik GPS dalam meter
 function hitungJarakMeter(lat1: number, lon1: number, lat2: number, lon2: number): number {
-  const R = 6371000; // Radius bumi dalam meter
+  const R = 6371000;
   const toRad = (deg: number) => (deg * Math.PI) / 180;
   const dLat = toRad(lat2 - lat1);
   const dLon = toRad(lon2 - lon1);
@@ -58,7 +56,7 @@ function hitungJarakMeter(lat1: number, lon1: number, lat2: number, lon2: number
 }
 
 export default function HalamanKaryawan() {
-  const [activeTab, setActiveTab] = useState<'absen' | 'lembur' | 'kasbon'>('absen');
+  const [activeTab, setActiveTab] = useState<'absen' | 'izin' | 'lembur' | 'kasbon'>('absen');
   const [daftarKaryawan, setDaftarKaryawan] = useState<Karyawan[]>([]);
   const [selectedId, setSelectedId] = useState('');
   const [pinInput, setPinInput] = useState('');
@@ -71,6 +69,12 @@ export default function HalamanKaryawan() {
   const [fotoPreview, setFotoPreview] = useState<string | null>(null);
   const [absenHariIni, setAbsenHariIni] = useState<AbsensiHariIni | null>(null);
   const [checking, setChecking] = useState(false);
+
+  // State Izin / Sakit
+  const [tanggalIzin, setTanggalIzin] = useState('');
+  const [jenisIzin, setJenisIzin] = useState<'Sakit' | 'Izin'>('Sakit');
+  const [alasanIzin, setAlasanIzin] = useState('');
+  const [fotoIzinFile, setFotoIzinFile] = useState<File | null>(null);
 
   // State Lembur
   const [tanggalLembur, setTanggalLembur] = useState('');
@@ -91,6 +95,7 @@ export default function HalamanKaryawan() {
     const todayStr = new Date(now.getTime() - offset).toISOString().split('T')[0];
 
     setTanggalHariIni(todayStr);
+    setTanggalIzin(todayStr);
     setTanggalLembur(todayStr);
     setTanggalTampil(
       now.toLocaleDateString('id-ID', {
@@ -173,7 +178,6 @@ export default function HalamanKaryawan() {
     return true;
   };
 
-  // Validasi Lokasi GPS dalam radius 50 meter dari toko
   const validasiLokasiGPS = (): Promise<boolean> => {
     return new Promise((resolve) => {
       if (!navigator.geolocation) {
@@ -212,7 +216,6 @@ export default function HalamanKaryawan() {
             }
             resolve(true);
           } else {
-            // Jika cabang belum diisi di data karyawan, cek ke toko terdekat
             const jarakAntapani = Math.round(
               hitungJarakMeter(userLat, userLng, LOKASI_TOKO.antapani.lat, LOKASI_TOKO.antapani.lng)
             );
@@ -356,6 +359,53 @@ export default function HalamanKaryawan() {
     }
   };
 
+  const handleAjukanIzin = async (e: React.FormEvent) => {
+    e.preventDefault();
+    if (!validasiPin()) return;
+    if (!alasanIzin.trim()) {
+      setPesan('❌ Keterangan / alasan wajib diisi.');
+      return;
+    }
+
+    setLoading(true);
+    setPesan('');
+    try {
+      let fotoUrl: string | null = null;
+      if (fotoIzinFile) {
+        const ext = fotoIzinFile.name.split('.').pop() || 'jpg';
+        const fileName = `izin/${tanggalIzin || tanggalHariIni}/${selectedId}-${Date.now()}.${ext}`;
+        const { error: uploadError } = await supabase.storage
+          .from('foto-absensi')
+          .upload(fileName, fotoIzinFile);
+        if (uploadError) throw uploadError;
+        const { data } = supabase.storage.from('foto-absensi').getPublicUrl(fileName);
+        fotoUrl = data.publicUrl;
+      }
+
+      const { error } = await supabase.from('izin_sakit').insert([
+        {
+          karyawan_id: selectedId,
+          tanggal: tanggalIzin || tanggalHariIni,
+          jenis: jenisIzin,
+          alasan: alasanIzin.trim(),
+          foto_bukti: fotoUrl,
+          status: 'Pending',
+        },
+      ]);
+
+      if (error) throw error;
+      setAlasanIzin('');
+      setFotoIzinFile(null);
+      setPinInput('');
+      setPesan(`✅ Pengajuan ${jenisIzin} terkirim! Menunggu persetujuan Manajer/Owner.`);
+    } catch (error: unknown) {
+      const msg = error instanceof Error ? error.message : 'Terjadi kesalahan';
+      setPesan('❌ Gagal mengajukan izin/sakit: ' + msg);
+    } finally {
+      setLoading(false);
+    }
+  };
+
   const handleAjukanLembur = async (e: React.FormEvent) => {
     e.preventDefault();
     if (!validasiPin()) return;
@@ -381,7 +431,7 @@ export default function HalamanKaryawan() {
       setDurasiJam('');
       setAlasanLembur('');
       setPinInput('');
-      setPesan('✅ Pengajuan lembur terkirim! Menunggu persetujuan Owner.');
+      setPesan('✅ Pengajuan lembur terkirim! Menunggu persetujuan Manajer/Owner.');
     } catch (error: unknown) {
       const msg = error instanceof Error ? error.message : 'Terjadi kesalahan';
       setPesan('❌ Gagal mengajukan lembur: ' + msg);
@@ -416,7 +466,7 @@ export default function HalamanKaryawan() {
       setNominalKasbon('');
       setKeperluanKasbon('');
       setPinInput('');
-      setPesan('✅ Pengajuan kasbon terkirim! Menunggu persetujuan Owner.');
+      setPesan('✅ Pengajuan kasbon terkirim! Menunggu persetujuan Manajer/Owner.');
     } catch (error: unknown) {
       const msg = error instanceof Error ? error.message : 'Terjadi kesalahan';
       setPesan('❌ Gagal mengajukan kasbon: ' + msg);
@@ -452,8 +502,8 @@ export default function HalamanKaryawan() {
         <p className="text-sm text-gray-500 mb-5 min-h-[20px]">{tanggalTampil}</p>
 
         {/* Tab Navigasi */}
-        <div className="grid grid-cols-3 gap-1 bg-green-50 p-1 rounded-xl mb-5">
-          {(['absen', 'lembur', 'kasbon'] as const).map((tab) => (
+        <div className="grid grid-cols-4 gap-1 bg-green-50 p-1 rounded-xl mb-5">
+          {(['absen', 'izin', 'lembur', 'kasbon'] as const).map((tab) => (
             <button
               key={tab}
               onClick={() => {
@@ -604,7 +654,87 @@ export default function HalamanKaryawan() {
           </div>
         )}
 
-        {/* TAB 2: LEMBUR */}
+        {/* TAB 2: IZIN / SAKIT */}
+        {activeTab === 'izin' && (
+          <form onSubmit={handleAjukanIzin} className="space-y-4 text-left">
+            <div className="grid grid-cols-2 gap-3">
+              <div>
+                <label className="block text-sm font-semibold text-gray-700 mb-1">
+                  Jenis
+                </label>
+                <select
+                  value={jenisIzin}
+                  onChange={(e) => setJenisIzin(e.target.value as 'Sakit' | 'Izin')}
+                  className="w-full p-3 border border-gray-300 rounded-xl text-gray-800 bg-gray-50"
+                >
+                  <option value="Sakit">Sakit</option>
+                  <option value="Izin">Izin</option>
+                </select>
+              </div>
+              <div>
+                <label className="block text-sm font-semibold text-gray-700 mb-1">
+                  Tanggal
+                </label>
+                <input
+                  type="date"
+                  value={tanggalIzin}
+                  onChange={(e) => setTanggalIzin(e.target.value)}
+                  className="w-full p-3 border border-gray-300 rounded-xl text-gray-800 bg-gray-50"
+                />
+              </div>
+            </div>
+
+            <div>
+              <label className="block text-sm font-semibold text-gray-700 mb-1">
+                Alasan / Keterangan
+              </label>
+              <textarea
+                rows={2}
+                placeholder="Contoh: Demam / Ada urusan keluarga"
+                value={alasanIzin}
+                onChange={(e) => setAlasanIzin(e.target.value)}
+                className="w-full p-3 border border-gray-300 rounded-xl text-gray-800 bg-gray-50"
+              />
+            </div>
+
+            <div>
+              <label className="block text-sm font-semibold text-gray-700 mb-1">
+                Foto Surat Dokter / Bukti (Opsional)
+              </label>
+              <input
+                type="file"
+                accept="image/*"
+                onChange={(e) => setFotoIzinFile(e.target.files?.[0] || null)}
+                className="w-full text-sm text-gray-600 file:mr-3 file:py-2 file:px-4 file:rounded-lg file:border-0 file:text-sm file:font-semibold file:bg-green-100 file:text-green-800 hover:file:bg-green-200"
+              />
+            </div>
+
+            <div>
+              <label className="block text-sm font-semibold text-gray-700 mb-1">
+                Masukkan PIN
+              </label>
+              <input
+                type="password"
+                inputMode="numeric"
+                maxLength={6}
+                placeholder="Masukkan PIN Anda"
+                value={pinInput}
+                onChange={(e) => setPinInput(e.target.value)}
+                className="w-full p-3 border border-gray-300 rounded-xl text-gray-800 bg-gray-50"
+              />
+            </div>
+
+            <button
+              type="submit"
+              disabled={loading}
+              className="w-full bg-green-600 hover:bg-green-700 text-white font-bold py-3.5 rounded-xl transition disabled:opacity-50"
+            >
+              {loading ? 'Mengirim...' : `Ajukan ${jenisIzin}`}
+            </button>
+          </form>
+        )}
+
+        {/* TAB 3: LEMBUR */}
         {activeTab === 'lembur' && (
           <form onSubmit={handleAjukanLembur} className="space-y-4 text-left">
             <div>
@@ -672,7 +802,7 @@ export default function HalamanKaryawan() {
           </form>
         )}
 
-        {/* TAB 3: KASBON */}
+        {/* TAB 4: KASBON */}
         {activeTab === 'kasbon' && (
           <form onSubmit={handleAjukanKasbon} className="space-y-4 text-left">
             <div>
