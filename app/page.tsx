@@ -359,6 +359,27 @@ export default function HalamanKaryawan() {
     }
   };
 
+  const kirimNotifTelegram = async (teks: string) => {
+    try {
+      await fetch('/api/notify', {
+        method: 'POST',
+        headers: { 'Content-Type': 'application/json' },
+        body: JSON.stringify({ pesan: teks }),
+      });
+    } catch {
+      // Abaikan jika notif gagal agar pengajuan karyawan tetap tersimpan
+    }
+  };
+
+  const getInfoKaryawanDipilih = () => {
+    const k = daftarKaryawan.find((item) => item.id === selectedId);
+    const nama = k?.nama || k?.nama_lengkap || 'Karyawan';
+    const cabang = k?.cabang || k?.lokasi_toko || '-';
+    return `${nama} (${cabang})`;
+  };
+
+// <-- Tempelkan kirimNotifTelegram & getInfoKaryawanDipilih DI SINI
+  
   const handleAjukanIzin = async (e: React.FormEvent) => {
     e.preventDefault();
     if (!validasiPin()) return;
@@ -394,6 +415,12 @@ export default function HalamanKaryawan() {
       ]);
 
       if (error) throw error;
+      await kirimNotifTelegram(
+     `📋 <b>PENGAJUAN ${jenisIzin.toUpperCase()}</b>\n` +
+     `Nama: ${getInfoKaryawanDipilih()}\n` +
+     `Tanggal: ${tanggalIzin || tanggalHariIni}\n` +
+     `Alasan: ${alasanIzin.trim()}`
+   );
       setAlasanIzin('');
       setFotoIzinFile(null);
       setPinInput('');
@@ -404,6 +431,7 @@ export default function HalamanKaryawan() {
     } finally {
       setLoading(false);
     }
+
   };
 
   const handleAjukanLembur = async (e: React.FormEvent) => {
@@ -428,6 +456,13 @@ export default function HalamanKaryawan() {
       ]);
 
       if (error) throw error;
+      await kirimNotifTelegram(
+     `⏰ <b>PENGAJUAN LEMBUR</b>\n` +
+     `Nama: ${getInfoKaryawanDipilih()}\n` +
+     `Tanggal: ${tanggalLembur || tanggalHariIni}\n` +
+     `Durasi: ${durasiJam} jam\n` +
+     `Alasan: ${alasanLembur.trim()}`
+   );
       setDurasiJam('');
       setAlasanLembur('');
       setPinInput('');
@@ -463,6 +498,12 @@ export default function HalamanKaryawan() {
       ]);
 
       if (error) throw error;
+      await kirimNotifTelegram(
+     `💸 <b>PENGAJUAN KASBON</b>\n` +
+     `Nama: ${getInfoKaryawanDipilih()}\n` +
+     `Nominal: Rp ${nominalAngka.toLocaleString('id-ID')}\n` +
+     `Keperluan: ${keperluanKasbon.trim()}`
+   );
       setNominalKasbon('');
       setKeperluanKasbon('');
       setPinInput('');
