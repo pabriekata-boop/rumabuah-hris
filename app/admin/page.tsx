@@ -53,6 +53,18 @@ interface Kasbon {
   disetujui_oleh?: string | null;
 }
 
+interface PenggajianRecord {
+  id: string;
+  karyawan_id: string;
+  bulan: string;
+  gaji_pokok: number;
+  bonus: number;
+  uang_lembur: number;
+  potongan_kasbon: number;
+  potongan_telat: number;
+  total_gaji: number;
+}
+
 interface CurrentUser {
   role: 'owner' | 'manajer';
   id: string;
@@ -115,6 +127,7 @@ export default function DashboardAdmin() {
   const [bonusJatinangor, setBonusJatinangor] = useState('0');
   const [potonganTelat, setPotonganTelat] = useState<Record<string, string>>({});
   const [savingGaji, setSavingGaji] = useState(false);
+  const [riwayatGaji, setRiwayatGaji] = useState<PenggajianRecord[]>([]);
 
   // Modal lihat foto
   const [fotoModal, setFotoModal] = useState<string | null>(null);
@@ -186,12 +199,14 @@ export default function DashboardAdmin() {
   );
 
   const fetchPengajuan = useCallback(async () => {
-    const [resLembur, resKasbon] = await Promise.all([
+    const [resLembur, resKasbon, resGaji] = await Promise.all([
       supabase.from('lembur').select('*').order('tanggal', { ascending: false }),
       supabase.from('kasbon').select('*').order('tanggal', { ascending: false }),
+      supabase.from('penggajian').select('*').order('bulan', { ascending: false }),
     ]);
     if (resLembur.data) setDaftarLembur(resLembur.data);
     if (resKasbon.data) setDaftarKasbon(resKasbon.data);
+    if (resGaji.data) setRiwayatGaji(resGaji.data);
   }, []);
 
   useEffect(() => {
@@ -490,6 +505,9 @@ export default function DashboardAdmin() {
     setSavingGaji(true);
     setPesanSimpan('');
 
+    // Hapus data bulan yang sama dulu agar tidak dobel saat disimpan ulang
+    await supabase.from('penggajian').delete().eq('bulan', bulanFilter);
+
     const rows = daftarKaryawan.map((k) => {
       const slip = hitungSlipKaryawan(k);
       return {
@@ -509,9 +527,50 @@ export default function DashboardAdmin() {
       setPesanSimpan('❌ Gagal menyimpan penggajian: ' + error.message);
     } else {
       setPesanSimpan(`✅ Rekap penggajian bulan ${bulanFilter} berhasil disimpan!`);
+      fetchPengajuan();
     }
     setSavingGaji(false);
   };
+
+  // Hitung rekap total gaji per bulan dari database
+  const rekapPerBulan = Object.values(
+    riwayatGaji.reduce(
+      (acc, row) => {
+        const bln = row.bulan || 'Tanpa Bulan';
+        if (!acc[bln]) {
+          acc[bln] = {
+            bulan: bln,
+            jumlahKaryawan: 0,
+            totalPokok: 0,
+            totalBonus: 0,
+            totalLembur: 0,
+            totalPotongan: 0,
+            grandTotal: 0,
+          };
+        }
+        acc[bln].jumlahKaryawan += 1;
+        acc[bln].totalPokok += Number(row.gaji_pokok || 0);
+        acc[bln].totalBonus += Number(row.bonus || 0);
+        acc[bln].totalLembur += Number(row.uang_lembur || 0);
+        acc[bln].totalPotongan +=
+          Number(row.potongan_kasbon || 0) + Number(row.potongan_telat || 0);
+        acc[bln].grandTotal += Number(row.total_gaji || 0);
+        return acc;
+      },
+      {} as Record<
+        string,
+        {
+          bulan: string;
+          jumlahKaryawan: number;
+          totalPokok: number;
+          totalBonus: number;
+          totalLembur: number;
+          totalPotongan: number;
+          grandTotal: number;
+        }
+      >
+    )
+  ).sort((a, b) => b.bulan.localeCompare(a.bulan));
 
   const pendingCount =
     daftarLembur.filter((l) => l.status === 'Pending').length +
@@ -979,122 +1038,223 @@ export default function DashboardAdmin() {
         )}
 
         {/* TAB 4: PENGGAJIAN (Khusus Owner) */}
-        {isOwner && activeTab === 'gaji' && (
-          <div className="bg-white p-5 rounded-2xl shadow-sm space-y-5">
-            <div className="grid grid-cols-1 sm:grid-cols-4 gap-3 bg-green-50 p-4 rounded-xl">
-              <div>
-                <label className="block text-xs font-semibold text-gray-600 mb-1">Bulan Gaji</label>
-                <input
-                  type="month"
-                  value={bulanFilter}
-                  onChange={(e) => setBulanFilter(e.target.value)}
-                  className="w-full p-2 border border-gray-300 rounded-lg text-sm bg-white"
-                />
-              </div>
-              <div>
-                <label className="block text-xs font-semibold text-gray-600 mb-1">
-                  Tarif Lembur / Jam (Rp)
-                </label>
-                <input
-                  type="number"
-                  value={tarifLemburPerJam}
-                  onChange={(e) => setTarifLemburPerJam(e.target.value)}
-                  className="w-full p-2 border border-gray-300 rounded-lg text-sm bg-white"
-                />
-              </div>
-              <div>
-                <label className="block text-xs font-semibold text-gray-600 mb-1">
-                  Total Bonus Antapani ({jumlahAntapani} org)
-                </label>
-                <input
-                  type="number"
-                  value={bonusAntapani}
-                  onChange={(e) => setBonusAntapani(e.target.value)}
-                  className="w-full p-2 border border-gray-300 rounded-lg text-sm bg-white"
-                />
-              </div>
-              <div>
-                <label className="block text-xs font-semibold text-gray-600 mb-1">
-                  Total Bonus Jatinangor ({jumlahJatinangor} org)
-                </label>
-                <input
-                  type="number"
-                  value={bonusJatinangor}
-                  onChange={(e) => setBonusJatinangor(e.target.value)}
-                  className="w-full p-2 border border-gray-300 rounded-lg text-sm bg-white"
-                />
-              </div>
-            </div>
+        {isOwner && activeTab === 'gaji' && (() => {
+          const semuaSlip = daftarKaryawan.map((k) => ({
+            karyawan: k,
+            cabang: (k.cabang || k.lokasi_toko || '').toLowerCase(),
+            ...hitungSlipKaryawan(k),
+          }));
 
-            <div className="overflow-x-auto">
-              <table className="w-full text-left border-collapse text-sm">
-                <thead>
-                  <tr className="border-b border-gray-200 text-gray-600">
-                    <th className="py-3 px-2">Karyawan</th>
-                    <th className="py-3 px-2">Gaji Pokok</th>
-                    <th className="py-3 px-2">Bonus Cabang</th>
-                    <th className="py-3 px-2">Lembur</th>
-                    <th className="py-3 px-2">Kasbon</th>
-                    <th className="py-3 px-2">Pot. Telat (Rp)</th>
-                    <th className="py-3 px-2 text-right">Total Terima</th>
-                  </tr>
-                </thead>
-                <tbody>
-                  {daftarKaryawan.map((k) => {
-                    const slip = hitungSlipKaryawan(k);
-                    const nama = k.nama || k.nama_lengkap || 'Tanpa Nama';
-                    const cabang = k.cabang || k.lokasi_toko || '-';
-                    return (
-                      <tr key={k.id} className="border-b border-gray-100">
-                        <td className="py-3 px-2">
-                          <div className="font-semibold text-gray-800">{nama}</div>
-                          <div className="text-xs text-gray-400">{cabang}</div>
-                        </td>
-                        <td className="py-3 px-2">{formatRp(slip.gajiPokok)}</td>
-                        <td className="py-3 px-2 text-green-700">+{formatRp(slip.bonus)}</td>
-                        <td className="py-3 px-2 text-green-700">
-                          +{formatRp(slip.uangLembur)}
-                          <span className="block text-xs text-gray-400">({slip.totalJamLembur} jam)</span>
-                        </td>
-                        <td className="py-3 px-2 text-red-600">-{formatRp(slip.totalKasbon)}</td>
-                        <td className="py-3 px-2">
-                          <input
-                            type="number"
-                            min="0"
-                            step="5000"
-                            placeholder="0"
-                            value={potonganTelat[k.id] || ''}
-                            onChange={(e) =>
-                              setPotonganTelat({ ...potonganTelat, [k.id]: e.target.value })
-                            }
-                            className="w-24 p-1.5 border border-gray-300 rounded-lg text-sm"
-                          />
-                        </td>
-                        <td className="py-3 px-2 text-right font-bold text-green-800">
-                          {formatRp(slip.totalGaji)}
-                        </td>
+          const totalSemua = semuaSlip.reduce((acc, s) => acc + s.totalGaji, 0);
+          const totalAntapani = semuaSlip
+            .filter((s) => s.cabang.includes('antapani'))
+            .reduce((acc, s) => acc + s.totalGaji, 0);
+          const totalJatinangor = semuaSlip
+            .filter((s) => s.cabang.includes('jatinangor'))
+            .reduce((acc, s) => acc + s.totalGaji, 0);
+
+          return (
+            <div className="space-y-6">
+              {/* Kartu Ringkasan Total Gaji Bulan Ini */}
+              <div className="grid grid-cols-1 sm:grid-cols-3 gap-4">
+                <div className="bg-white p-4 rounded-2xl shadow-sm border-l-4 border-green-700">
+                  <p className="text-xs text-gray-500">Total Pengeluaran Gaji ({bulanFilter})</p>
+                  <p className="text-xl font-bold text-green-800 mt-1">{formatRp(totalSemua)}</p>
+                </div>
+                <div className="bg-white p-4 rounded-2xl shadow-sm border-l-4 border-emerald-500">
+                  <p className="text-xs text-gray-500">Total Cabang Antapani</p>
+                  <p className="text-xl font-bold text-gray-800 mt-1">{formatRp(totalAntapani)}</p>
+                </div>
+                <div className="bg-white p-4 rounded-2xl shadow-sm border-l-4 border-teal-500">
+                  <p className="text-xs text-gray-500">Total Cabang Jatinangor</p>
+                  <p className="text-xl font-bold text-gray-800 mt-1">{formatRp(totalJatinangor)}</p>
+                </div>
+              </div>
+
+              {/* Kalkulator & Tabel Gaji Bulan Dipilih */}
+              <div className="bg-white p-5 rounded-2xl shadow-sm space-y-5">
+                <div className="grid grid-cols-1 sm:grid-cols-4 gap-3 bg-green-50 p-4 rounded-xl">
+                  <div>
+                    <label className="block text-xs font-semibold text-gray-600 mb-1">Bulan Gaji</label>
+                    <input
+                      type="month"
+                      value={bulanFilter}
+                      onChange={(e) => setBulanFilter(e.target.value)}
+                      className="w-full p-2 border border-gray-300 rounded-lg text-sm bg-white"
+                    />
+                  </div>
+                  <div>
+                    <label className="block text-xs font-semibold text-gray-600 mb-1">
+                      Tarif Lembur / Jam (Rp)
+                    </label>
+                    <input
+                      type="number"
+                      value={tarifLemburPerJam}
+                      onChange={(e) => setTarifLemburPerJam(e.target.value)}
+                      className="w-full p-2 border border-gray-300 rounded-lg text-sm bg-white"
+                    />
+                  </div>
+                  <div>
+                    <label className="block text-xs font-semibold text-gray-600 mb-1">
+                      Total Bonus Antapani ({jumlahAntapani} org)
+                    </label>
+                    <input
+                      type="number"
+                      value={bonusAntapani}
+                      onChange={(e) => setBonusAntapani(e.target.value)}
+                      className="w-full p-2 border border-gray-300 rounded-lg text-sm bg-white"
+                    />
+                  </div>
+                  <div>
+                    <label className="block text-xs font-semibold text-gray-600 mb-1">
+                      Total Bonus Jatinangor ({jumlahJatinangor} org)
+                    </label>
+                    <input
+                      type="number"
+                      value={bonusJatinangor}
+                      onChange={(e) => setBonusJatinangor(e.target.value)}
+                      className="w-full p-2 border border-gray-300 rounded-lg text-sm bg-white"
+                    />
+                  </div>
+                </div>
+
+                <div className="overflow-x-auto">
+                  <table className="w-full text-left border-collapse text-sm">
+                    <thead>
+                      <tr className="border-b border-gray-200 text-gray-600">
+                        <th className="py-3 px-2">Karyawan</th>
+                        <th className="py-3 px-2">Gaji Pokok</th>
+                        <th className="py-3 px-2">Bonus Cabang</th>
+                        <th className="py-3 px-2">Lembur</th>
+                        <th className="py-3 px-2">Kasbon</th>
+                        <th className="py-3 px-2">Pot. Telat (Rp)</th>
+                        <th className="py-3 px-2 text-right">Total Terima</th>
                       </tr>
-                    );
-                  })}
-                </tbody>
-              </table>
-            </div>
+                    </thead>
+                    <tbody>
+                      {semuaSlip.map((slip) => {
+                        const k = slip.karyawan;
+                        const nama = k.nama || k.nama_lengkap || 'Tanpa Nama';
+                        const cabang = k.cabang || k.lokasi_toko || '-';
+                        return (
+                          <tr key={k.id} className="border-b border-gray-100">
+                            <td className="py-3 px-2">
+                              <div className="font-semibold text-gray-800">{nama}</div>
+                              <div className="text-xs text-gray-400">{cabang}</div>
+                            </td>
+                            <td className="py-3 px-2">{formatRp(slip.gajiPokok)}</td>
+                            <td className="py-3 px-2 text-green-700">+{formatRp(slip.bonus)}</td>
+                            <td className="py-3 px-2 text-green-700">
+                              +{formatRp(slip.uangLembur)}
+                              <span className="block text-xs text-gray-400">({slip.totalJamLembur} jam)</span>
+                            </td>
+                            <td className="py-3 px-2 text-red-600">-{formatRp(slip.totalKasbon)}</td>
+                            <td className="py-3 px-2">
+                              <input
+                                type="number"
+                                min="0"
+                                step="5000"
+                                placeholder="0"
+                                value={potonganTelat[k.id] || ''}
+                                onChange={(e) =>
+                                  setPotonganTelat({ ...potonganTelat, [k.id]: e.target.value })
+                                }
+                                className="w-24 p-1.5 border border-gray-300 rounded-lg text-sm"
+                              />
+                            </td>
+                            <td className="py-3 px-2 text-right font-bold text-green-800">
+                              {formatRp(slip.totalGaji)}
+                            </td>
+                          </tr>
+                        );
+                      })}
+                    </tbody>
+                    <tfoot>
+                      <tr className="bg-green-50 font-bold text-green-900">
+                        <td className="py-3 px-2">TOTAL</td>
+                        <td className="py-3 px-2">
+                          {formatRp(semuaSlip.reduce((a, s) => a + s.gajiPokok, 0))}
+                        </td>
+                        <td className="py-3 px-2">
+                          {formatRp(semuaSlip.reduce((a, s) => a + s.bonus, 0))}
+                        </td>
+                        <td className="py-3 px-2">
+                          {formatRp(semuaSlip.reduce((a, s) => a + s.uangLembur, 0))}
+                        </td>
+                        <td className="py-3 px-2 text-red-700">
+                          -{formatRp(semuaSlip.reduce((a, s) => a + s.totalKasbon, 0))}
+                        </td>
+                        <td className="py-3 px-2 text-red-700">
+                          -{formatRp(semuaSlip.reduce((a, s) => a + s.dendaTelat, 0))}
+                        </td>
+                        <td className="py-3 px-2 text-right text-base">{formatRp(totalSemua)}</td>
+                      </tr>
+                    </tfoot>
+                  </table>
+                </div>
 
-            {pesanSimpan && (
-              <p className="text-sm font-medium text-green-700">{pesanSimpan}</p>
-            )}
+                {pesanSimpan && (
+                  <p className="text-sm font-medium text-green-700">{pesanSimpan}</p>
+                )}
 
-            <div className="flex justify-end">
-              <button
-                onClick={handleSimpanPenggajian}
-                disabled={savingGaji}
-                className="px-6 py-3 bg-green-700 hover:bg-green-800 text-white font-bold rounded-xl transition disabled:opacity-50"
-              >
-                {savingGaji ? 'Menyimpan...' : `Simpan Rekap Gaji (${bulanFilter})`}
-              </button>
+                <div className="flex justify-end">
+                  <button
+                    onClick={handleSimpanPenggajian}
+                    disabled={savingGaji}
+                    className="px-6 py-3 bg-green-700 hover:bg-green-800 text-white font-bold rounded-xl transition disabled:opacity-50"
+                  >
+                    {savingGaji ? 'Menyimpan...' : `Simpan Rekap Gaji (${bulanFilter})`}
+                  </button>
+                </div>
+              </div>
+
+              {/* Riwayat Rekap Total Gaji Per Bulan */}
+              <div className="bg-white p-5 rounded-2xl shadow-sm">
+                <h2 className="text-lg font-bold text-gray-800 mb-4">
+                  Riwayat Rekap Total Gaji per Bulan
+                </h2>
+                {rekapPerBulan.length === 0 ? (
+                  <p className="text-sm text-gray-400 py-4">
+                    Belum ada rekap gaji yang disimpan. Klik tombol &quot;Simpan Rekap Gaji&quot; di atas.
+                  </p>
+                ) : (
+                  <div className="overflow-x-auto">
+                    <table className="w-full text-left border-collapse text-sm">
+                      <thead>
+                        <tr className="border-b border-gray-200 text-gray-600">
+                          <th className="py-3 px-2">Bulan</th>
+                          <th className="py-3 px-2">Karyawan</th>
+                          <th className="py-3 px-2">Gaji Pokok</th>
+                          <th className="py-3 px-2">Bonus + Lembur</th>
+                          <th className="py-3 px-2">Total Potongan</th>
+                          <th className="py-3 px-2 text-right">Total Gaji Dibayar</th>
+                        </tr>
+                      </thead>
+                      <tbody>
+                        {rekapPerBulan.map((r) => (
+                          <tr key={r.bulan} className="border-b border-gray-100 hover:bg-green-50/50">
+                            <td className="py-3 px-2 font-bold text-gray-800">{r.bulan}</td>
+                            <td className="py-3 px-2 text-gray-600">{r.jumlahKaryawan} org</td>
+                            <td className="py-3 px-2">{formatRp(r.totalPokok)}</td>
+                            <td className="py-3 px-2 text-green-700">
+                              +{formatRp(r.totalBonus + r.totalLembur)}
+                            </td>
+                            <td className="py-3 px-2 text-red-600">
+                              -{formatRp(r.totalPotongan)}
+                            </td>
+                            <td className="py-3 px-2 text-right font-bold text-green-800">
+                              {formatRp(r.grandTotal)}
+                            </td>
+                          </tr>
+                        ))}
+                      </tbody>
+                    </table>
+                  </div>
+                )}
+              </div>
             </div>
-          </div>
-        )}
+          );
+        })()}
 
         {/* TAB 5: TAMBAH & KELOLA KARYAWAN (Khusus Owner) */}
         {isOwner && activeTab === 'karyawan' && (
