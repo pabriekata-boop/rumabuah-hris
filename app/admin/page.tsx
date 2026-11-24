@@ -95,6 +95,14 @@ export default function DashboardAdmin() {
   const [savingJadwal, setSavingJadwal] = useState(false);
   const [pesanJadwal, setPesanJadwal] = useState('');
 
+  // Form Tambah Karyawan Baru
+  const [namaBaru, setNamaBaru] = useState('');
+  const [cabangBaru, setCabangBaru] = useState('Antapani');
+  const [roleBaru, setRoleBaru] = useState('staf');
+  const [gajiBaruInput, setGajiBaruInput] = useState('');
+  const [pinBaruInput, setPinBaruInput] = useState('');
+  const [addingKaryawan, setAddingKaryawan] = useState(false);
+
   // Edit PIN, Gaji Pokok & Role
   const [editPins, setEditPins] = useState<Record<string, string>>({});
   const [editGaji, setEditGaji] = useState<Record<string, string>>({});
@@ -205,7 +213,6 @@ export default function DashboardAdmin() {
     }
   }, [currentUser, tanggalJadwal, daftarKaryawan, fetchJadwalTanggal]);
 
-  // Login Owner atau Manajer
   const handleLogin = async (e: React.FormEvent) => {
     e.preventDefault();
     setPinError('');
@@ -248,6 +255,64 @@ export default function DashboardAdmin() {
     setCurrentUser(null);
     setActiveTab('absensi');
     setPinInput('');
+  };
+
+  const handleTambahKaryawan = async (e: React.FormEvent) => {
+    e.preventDefault();
+    if (!namaBaru.trim()) {
+      setPesanSimpan('❌ Nama karyawan wajib diisi.');
+      return;
+    }
+    const pinClean = pinBaruInput.trim() || '1234';
+    if (pinClean.length < 4) {
+      setPesanSimpan('❌ PIN minimal 4 digit.');
+      return;
+    }
+
+    setAddingKaryawan(true);
+    setPesanSimpan('');
+
+    // Deteksi otomatis nama kolom di tabel karyawan Supabase Anda
+    const sample = daftarKaryawan[0];
+    const kolomNama = sample && 'nama_lengkap' in sample && !('nama' in sample) ? 'nama_lengkap' : 'nama';
+    const kolomCabang = sample && 'lokasi_toko' in sample && !('cabang' in sample) ? 'lokasi_toko' : 'cabang';
+
+    const payload: Record<string, unknown> = {
+      [kolomNama]: namaBaru.trim(),
+      [kolomCabang]: cabangBaru,
+      role: roleBaru,
+      gaji_pokok: Number(gajiBaruInput || 0),
+      pin: pinClean,
+    };
+
+    const { error } = await supabase.from('karyawan').insert([payload]);
+
+    if (error) {
+      setPesanSimpan('❌ Gagal menambah karyawan: ' + error.message);
+    } else {
+      setNamaBaru('');
+      setGajiBaruInput('');
+      setPinBaruInput('');
+      setRoleBaru('staf');
+      setPesanSimpan('✅ Karyawan baru berhasil ditambahkan!');
+      fetchKaryawan();
+      setTimeout(() => setPesanSimpan(''), 3000);
+    }
+    setAddingKaryawan(false);
+  };
+
+  const handleHapusKaryawan = async (id: string, nama: string) => {
+    const konfirmasi = window.confirm(`Yakin ingin menghapus karyawan "${nama}"?`);
+    if (!konfirmasi) return;
+
+    const { error } = await supabase.from('karyawan').delete().eq('id', id);
+    if (error) {
+      setPesanSimpan('❌ Gagal menghapus: ' + error.message);
+    } else {
+      setPesanSimpan(`✅ Karyawan "${nama}" berhasil dihapus.`);
+      fetchKaryawan();
+      setTimeout(() => setPesanSimpan(''), 3000);
+    }
   };
 
   const handleUbahShift = (karyawanId: string, shiftBaru: string) => {
@@ -294,7 +359,7 @@ export default function DashboardAdmin() {
   const handleUpdateKaryawan = async (karyawanId: string) => {
     const pinBaru = editPins[karyawanId]?.trim();
     const gajiBaru = Number(editGaji[karyawanId] || 0);
-    const roleBaru = editRoles[karyawanId] || 'staf';
+    const roleEdit = editRoles[karyawanId] || 'staf';
 
     if (!pinBaru || pinBaru.length < 4) {
       setPesanSimpan('❌ PIN minimal 4 digit.');
@@ -303,7 +368,7 @@ export default function DashboardAdmin() {
 
     const { error } = await supabase
       .from('karyawan')
-      .update({ pin: pinBaru, gaji_pokok: gajiBaru, role: roleBaru })
+      .update({ pin: pinBaru, gaji_pokok: gajiBaru, role: roleEdit })
       .eq('id', karyawanId);
 
     if (error) {
@@ -366,7 +431,6 @@ export default function DashboardAdmin() {
     return cabang.includes(cabangFilter.toLowerCase());
   });
 
-  // Khusus Jadwal Shift: kecualikan Manajer karena manajer tidak ikut shift
   const stafUntukJadwal = karyawanFiltered.filter((k) => k.role !== 'manajer');
 
   const jumlahAntapani = daftarKaryawan.filter((k) =>
@@ -453,7 +517,6 @@ export default function DashboardAdmin() {
     daftarLembur.filter((l) => l.status === 'Pending').length +
     daftarKasbon.filter((k) => k.status === 'Pending').length;
 
-  // Tampilan Login
   if (!currentUser) {
     return (
       <div className="min-h-screen bg-green-50 flex items-center justify-center p-4">
@@ -656,7 +719,7 @@ export default function DashboardAdmin() {
           </div>
         )}
 
-        {/* TAB 2: JADWAL SHIFT PER TANGGAL (Manajer tidak ikut jadwal shift) */}
+        {/* TAB 2: JADWAL SHIFT PER TANGGAL */}
         {activeTab === 'jadwal' && (
           <div className="bg-white p-5 rounded-2xl shadow-sm space-y-5">
             <div className="flex flex-wrap gap-3 items-center justify-between">
@@ -1033,76 +1096,158 @@ export default function DashboardAdmin() {
           </div>
         )}
 
-        {/* TAB 5: KELOLA KARYAWAN, ROLE, PIN & GAJI POKOK (Khusus Owner) */}
+        {/* TAB 5: TAMBAH & KELOLA KARYAWAN (Khusus Owner) */}
         {isOwner && activeTab === 'karyawan' && (
-          <div className="bg-white p-5 rounded-2xl shadow-sm">
-            <h2 className="text-lg font-bold text-gray-800 mb-4">
-              Atur Role, PIN & Gaji Pokok Karyawan
-            </h2>
-            {pesanSimpan && (
-              <p className="mb-4 text-sm font-medium text-green-700">{pesanSimpan}</p>
-            )}
-            <div className="space-y-3">
-              {daftarKaryawan.map((k) => {
-                const nama = k.nama || k.nama_lengkap || 'Tanpa Nama';
-                const cabang = k.cabang || k.lokasi_toko || '-';
-                return (
-                  <div
-                    key={k.id}
-                    className="flex flex-col md:flex-row md:items-center justify-between gap-3 p-3.5 border border-gray-100 rounded-xl bg-gray-50"
+          <div className="space-y-6">
+            {/* Form Tambah Karyawan Baru */}
+            <form
+              onSubmit={handleTambahKaryawan}
+              className="bg-white p-5 rounded-2xl shadow-sm border border-green-100"
+            >
+              <h2 className="text-lg font-bold text-green-800 mb-4">+ Tambah Karyawan Baru</h2>
+              <div className="grid grid-cols-1 sm:grid-cols-2 md:grid-cols-5 gap-3">
+                <div>
+                  <label className="text-xs text-gray-500 block mb-1">Nama Karyawan</label>
+                  <input
+                    type="text"
+                    placeholder="Contoh: Budi"
+                    value={namaBaru}
+                    onChange={(e) => setNamaBaru(e.target.value)}
+                    className="w-full p-2 border border-gray-300 rounded-lg text-sm"
+                  />
+                </div>
+                <div>
+                  <label className="text-xs text-gray-500 block mb-1">Cabang</label>
+                  <select
+                    value={cabangBaru}
+                    onChange={(e) => setCabangBaru(e.target.value)}
+                    className="w-full p-2 border border-gray-300 rounded-lg text-sm bg-white"
                   >
-                    <div>
-                      <p className="font-semibold text-gray-800">{nama}</p>
-                      <p className="text-xs text-gray-500">{cabang}</p>
-                    </div>
-                    <div className="flex flex-wrap items-end gap-2">
+                    <option value="Antapani">Antapani</option>
+                    <option value="Jatinangor">Jatinangor</option>
+                  </select>
+                </div>
+                <div>
+                  <label className="text-xs text-gray-500 block mb-1">Role</label>
+                  <select
+                    value={roleBaru}
+                    onChange={(e) => setRoleBaru(e.target.value)}
+                    className="w-full p-2 border border-gray-300 rounded-lg text-sm bg-white"
+                  >
+                    <option value="staf">Staf</option>
+                    <option value="manajer">Manajer</option>
+                  </select>
+                </div>
+                <div>
+                  <label className="text-xs text-gray-500 block mb-1">Gaji Pokok (Rp)</label>
+                  <input
+                    type="number"
+                    step="50000"
+                    placeholder="1500000"
+                    value={gajiBaruInput}
+                    onChange={(e) => setGajiBaruInput(e.target.value)}
+                    className="w-full p-2 border border-gray-300 rounded-lg text-sm"
+                  />
+                </div>
+                <div>
+                  <label className="text-xs text-gray-500 block mb-1">PIN (4-6 digit)</label>
+                  <input
+                    type="text"
+                    maxLength={6}
+                    placeholder="1234"
+                    value={pinBaruInput}
+                    onChange={(e) => setPinBaruInput(e.target.value)}
+                    className="w-full p-2 border border-gray-300 rounded-lg text-sm font-mono"
+                  />
+                </div>
+              </div>
+              <div className="mt-4 flex justify-end">
+                <button
+                  type="submit"
+                  disabled={addingKaryawan}
+                  className="px-5 py-2.5 bg-green-700 hover:bg-green-800 text-white text-sm font-bold rounded-xl transition disabled:opacity-50"
+                >
+                  {addingKaryawan ? 'Menambahkan...' : '+ Tambah Karyawan'}
+                </button>
+              </div>
+            </form>
+
+            {/* Daftar Karyawan */}
+            <div className="bg-white p-5 rounded-2xl shadow-sm">
+              <h2 className="text-lg font-bold text-gray-800 mb-4">
+                Daftar Karyawan ({daftarKaryawan.length} orang)
+              </h2>
+              {pesanSimpan && (
+                <p className="mb-4 text-sm font-medium text-green-700">{pesanSimpan}</p>
+              )}
+              <div className="space-y-3">
+                {daftarKaryawan.map((k) => {
+                  const nama = k.nama || k.nama_lengkap || 'Tanpa Nama';
+                  const cabang = k.cabang || k.lokasi_toko || '-';
+                  return (
+                    <div
+                      key={k.id}
+                      className="flex flex-col md:flex-row md:items-center justify-between gap-3 p-3.5 border border-gray-100 rounded-xl bg-gray-50"
+                    >
                       <div>
-                        <span className="text-xs text-gray-500 block mb-1">Role</span>
-                        <select
-                          value={editRoles[k.id] || 'staf'}
-                          onChange={(e) =>
-                            setEditRoles({ ...editRoles, [k.id]: e.target.value })
-                          }
-                          className="p-2 border border-gray-300 rounded-lg text-sm bg-white"
+                        <p className="font-semibold text-gray-800">{nama}</p>
+                        <p className="text-xs text-gray-500">{cabang}</p>
+                      </div>
+                      <div className="flex flex-wrap items-end gap-2">
+                        <div>
+                          <span className="text-xs text-gray-500 block mb-1">Role</span>
+                          <select
+                            value={editRoles[k.id] || 'staf'}
+                            onChange={(e) =>
+                              setEditRoles({ ...editRoles, [k.id]: e.target.value })
+                            }
+                            className="p-2 border border-gray-300 rounded-lg text-sm bg-white"
+                          >
+                            <option value="staf">Staf</option>
+                            <option value="manajer">Manajer</option>
+                          </select>
+                        </div>
+                        <div>
+                          <span className="text-xs text-gray-500 block mb-1">Gaji Pokok (Rp)</span>
+                          <input
+                            type="number"
+                            step="50000"
+                            value={editGaji[k.id] || ''}
+                            onChange={(e) =>
+                              setEditGaji({ ...editGaji, [k.id]: e.target.value })
+                            }
+                            className="w-32 p-2 border border-gray-300 rounded-lg text-sm bg-white"
+                          />
+                        </div>
+                        <div>
+                          <span className="text-xs text-gray-500 block mb-1">PIN</span>
+                          <input
+                            type="text"
+                            maxLength={6}
+                            value={editPins[k.id] || ''}
+                            onChange={(e) =>
+                              setEditPins({ ...editPins, [k.id]: e.target.value })
+                            }
+                            className="w-20 p-2 border border-gray-300 rounded-lg text-center text-sm font-mono bg-white"
+                          />
+                        </div>
+                        <button
+                          onClick={() => handleUpdateKaryawan(k.id)}
+                          className="px-3.5 py-2 bg-green-600 hover:bg-green-700 text-white text-sm font-semibold rounded-lg"
                         >
-                          <option value="staf">Staf</option>
-                          <option value="manajer">Manajer</option>
-                        </select>
+                          Simpan
+                        </button>
+                        <button
+                          onClick={() => handleHapusKaryawan(k.id, nama)}
+                          className="px-3 py-2 bg-red-100 hover:bg-red-200 text-red-700 text-sm font-semibold rounded-lg"
+                        >
+                          Hapus
+                        </button>
                       </div>
-                      <div>
-                        <span className="text-xs text-gray-500 block mb-1">Gaji Pokok (Rp)</span>
-                        <input
-                          type="number"
-                          step="50000"
-                          value={editGaji[k.id] || ''}
-                          onChange={(e) =>
-                            setEditGaji({ ...editGaji, [k.id]: e.target.value })
-                          }
-                          className="w-36 p-2 border border-gray-300 rounded-lg text-sm bg-white"
-                        />
-                      </div>
-                      <div>
-                        <span className="text-xs text-gray-500 block mb-1">PIN</span>
-                        <input
-                          type="text"
-                          maxLength={6}
-                          value={editPins[k.id] || ''}
-                          onChange={(e) =>
-                            setEditPins({ ...editPins, [k.id]: e.target.value })
-                          }
-                          className="w-24 p-2 border border-gray-300 rounded-lg text-center text-sm font-mono bg-white"
-                        />
-                      </div>
-                      <button
-                        onClick={() => handleUpdateKaryawan(k.id)}
-                        className="px-4 py-2 bg-green-600 hover:bg-green-700 text-white text-sm font-semibold rounded-lg"
-                      >
-                        Simpan
-                      </button>
                     </div>
-                  </div>
-                );
-              })}
+                  );
+                })}
+              </div>
             </div>
           </div>
         )}
