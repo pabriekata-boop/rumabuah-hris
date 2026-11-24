@@ -21,6 +21,7 @@ export default function AbsensiKaryawan() {
   const [daftarKaryawan, setDaftarKaryawan] = useState<Karyawan[]>([]);
   const [selectedId, setSelectedId] = useState('');
   const [absenHariIni, setAbsenHariIni] = useState<AbsensiHariIni | null>(null);
+  const [tanggalTampil, setTanggalTampil] = useState('');
   const [loading, setLoading] = useState(false);
   const [checking, setChecking] = useState(false);
   const [pesan, setPesan] = useState('');
@@ -32,8 +33,17 @@ export default function AbsensiKaryawan() {
     return new Date(now.getTime() - offset).toISOString().split('T')[0];
   };
 
-  // 1. Ambil daftar karyawan saat halaman dibuka
+  // 1. Set tanggal tampilan & ambil daftar karyawan saat halaman dibuka di browser
   useEffect(() => {
+    setTanggalTampil(
+      new Date().toLocaleDateString('id-ID', {
+        weekday: 'long',
+        day: 'numeric',
+        month: 'long',
+        year: 'numeric',
+      })
+    );
+
     const fetchKaryawan = async () => {
       const { data, error } = await supabase
         .from('karyawan')
@@ -139,7 +149,7 @@ export default function AbsensiKaryawan() {
     }
   };
 
-  // Format jam agar rapi (misal 08:15 WIB)
+  // Format jam agar rapi (misal 08:15)
   const formatJam = (isoString: string | null) => {
     if (!isoString) return '-';
     return new Date(isoString).toLocaleTimeString('id-ID', {
@@ -152,13 +162,8 @@ export default function AbsensiKaryawan() {
     <div className="min-h-screen bg-green-50 flex flex-col items-center justify-center p-4">
       <div className="bg-white p-8 rounded-2xl shadow-lg max-w-sm w-full text-center border-t-4 border-green-600">
         <h1 className="text-2xl font-bold text-green-800 mb-1">Ruma Buah HRIS</h1>
-        <p className="text-sm text-gray-500 mb-6">
-          {new Date().toLocaleDateString('id-ID', {
-            weekday: 'long',
-            day: 'numeric',
-            month: 'long',
-            year: 'numeric',
-          })}
+        <p className="text-sm text-gray-500 mb-6 min-h-[20px]">
+          {tanggalTampil}
         </p>
 
         {/* Dropdown Pilih Karyawan */}
