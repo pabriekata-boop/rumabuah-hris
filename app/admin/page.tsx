@@ -714,6 +714,7 @@ export default function DashboardAdmin() {
         { id: 'absensi', label: 'Absensi' },
         { id: 'jadwal', label: 'Jadwal Shift' },
         { id: 'approval', label: 'Approval' },
+        { id: 'gaji', label: 'Penggajian' },
       ] as const);
 
   return (
@@ -1251,7 +1252,7 @@ export default function DashboardAdmin() {
         )}
 
         {/* TAB 4: PENGGAJIAN (Khusus Owner) */}
-        {isOwner && activeTab === 'gaji' && (() => {
+        {activeTab === 'gaji' && (() => {
           const semuaSlip = daftarKaryawan.map((k) => ({
             karyawan: k,
             cabang: (k.cabang || k.lokasi_toko || '').toLowerCase(),
