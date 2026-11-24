@@ -517,8 +517,50 @@ export default function DashboardAdmin() {
       currency: 'IDR',
       maximumFractionDigits: 0,
     }).format(angka);
+    
+    const handleKirimSlipWA = (
+    k: Karyawan,
+    slip: {
+      gajiPokok: number;
+      bonus: number;
+      totalJamLembur: number;
+      uangLembur: number;
+      totalKasbon: number;
+      jumlahTelat: number;
+      dendaTelat: number;
+      totalGaji: number;
+    }
+  ) => {
+    const rawWa = (k.no_wa || '').replace(/\D/g, '');
+    if (!rawWa) {
+      alert(`Nomor WA untuk ${k.nama || k.nama_lengkap} belum diisi di tab Karyawan & PIN.`);
+      return;
+    }
 
-  const getNamaKaryawan = (id: string) => {
+    const nomorWa = rawWa.startsWith('0') ? '62' + rawWa.slice(1) : rawWa;
+    const nama = k.nama || k.nama_lengkap || 'Karyawan';
+    const cabang = k.cabang || k.lokasi_toko || '-';
+
+    const teks = [
+      `*SLIP GAJI RUMA BUAH*`,
+      `Periode: ${bulanFilter}`,
+      `Nama: ${nama} (${cabang})`,
+      ``,
+      `Gaji Pokok: ${formatRp(slip.gajiPokok)}`,
+      `Bonus Cabang: +${formatRp(slip.bonus)}`,
+      `Lembur (${slip.totalJamLembur} jam): +${formatRp(slip.uangLembur)}`,
+      `Potongan Kasbon: -${formatRp(slip.totalKasbon)}`,
+      `Potongan Telat (${slip.jumlahTelat}x): -${formatRp(slip.dendaTelat)}`,
+      `---------------------------`,
+      `*TOTAL DITERIMA: ${formatRp(slip.totalGaji)}*`,
+      ``,
+      `Terima kasih atas kerja kerasnya!`,
+    ].join('\n');
+
+    window.open(`https://wa.me/${nomorWa}?text=${encodeURIComponent(teks)}`, '_blank');
+  };
+
+    const getNamaKaryawan = (id: string) => {
     const k = daftarKaryawan.find((item) => item.id === id);
     if (!k) return 'Karyawan';
     const nama = k.nama || k.nama_lengkap || 'Tanpa Nama';
@@ -1388,6 +1430,7 @@ export default function DashboardAdmin() {
                         <th className="py-3 px-2">Kasbon</th>
                         <th className="py-3 px-2">Pot. Telat (Rp)</th>
                         <th className="py-3 px-2 text-right">Total Terima</th>
+                        <th className="py-3 px-2 text-center">Slip WA</th>
                       </tr>
                     </thead>
                     <tbody>
@@ -1435,6 +1478,19 @@ export default function DashboardAdmin() {
                             <td className="py-3 px-2 text-right font-bold text-green-800">
                               {formatRp(slip.totalGaji)}
                             </td>
+                            <td className="py-3 px-2 text-center">
+                           <button
+                             onClick={() => handleKirimSlipWA(k, slip)}
+                             disabled={!k.no_wa}
+                             className={`px-3 py-1.5 rounded-lg text-xs font-bold transition ${
+                               k.no_wa
+                                 ? 'bg-green-600 hover:bg-green-700 text-white'
+                                 : 'bg-gray-200 text-gray-400 cursor-not-allowed'
+                             }`}
+                           >
+                             {k.no_wa ? 'Kirim WA' : 'No WA Kosong'}
+                           </button>
+                         </td>
                           </tr>
                         );
                       })}
@@ -1458,7 +1514,9 @@ export default function DashboardAdmin() {
                           -{formatRp(semuaSlip.reduce((a, s) => a + s.dendaTelat, 0))}
                         </td>
                         <td className="py-3 px-2 text-right text-base">{formatRp(totalSemua)}</td>
+                      <td className="py-3 px-2"></td>
                       </tr>
+ 
                     </tfoot>
                   </table>
                 </div>
