@@ -3,7 +3,6 @@ import { useState, useEffect } from 'react';
 import { supabase } from '../lib/supabase';
 
 interface Karyawan {
-  interface Karyawan {
   id: string;
   nama?: string;
   nama_lengkap?: string;
@@ -13,7 +12,6 @@ interface Karyawan {
   shift_masuk?: string;
   shift_pulang?: string;
   hari_libur?: string;
-}
 }
 
 interface AbsensiHariIni {
