@@ -1260,9 +1260,18 @@ export default function DashboardAdmin() {
                         return (
                           <tr key={k.id} className="border-b border-gray-100">
                             <td className="py-3 px-2">
-                              <div className="font-semibold text-gray-800">{nama}</div>
-                              <div className="text-xs text-gray-400">{cabang}</div>
-                            </td>
+                            {absen?.jam_masuk ? (
+                              <span className="px-2 py-1 bg-green-100 text-green-800 rounded-lg font-medium">
+                                {formatJam(absen.jam_masuk)}
+                              </span>
+                            ) : izinHariIni ? (
+                              <span className="px-2 py-1 bg-blue-100 text-blue-800 rounded-lg font-medium">
+                                {izinHariIni.jenis}
+                              </span>
+                            ) : (
+                              <span className="text-gray-400">Belum absen</span>
+                            )}
+                          </td>
                             <td className="py-3 px-2">{formatRp(slip.gajiPokok)}</td>
                             <td className="py-3 px-2 text-green-700">+{formatRp(slip.bonus)}</td>
                             <td className="py-3 px-2 text-green-700">
