@@ -28,6 +28,35 @@ interface JadwalShift {
   jam_pulang: string;
 }
 
+// Koordinat Toko Ruma Buah & Batas Radius (Meter)
+const LOKASI_TOKO = {
+  antapani: {
+    nama: 'Ruma Buah Antapani',
+    lat: -6.917160652418372,
+    lng: 107.6614519441786,
+  },
+  jatinangor: {
+    nama: 'Ruma Buah Jatinangor',
+    lat: -6.937227239864906,
+    lng: 107.76018732270263,
+  },
+};
+
+const RADIUS_MAKSIMAL_METER = 50;
+
+// Rumus Haversine untuk menghitung jarak antar 2 titik GPS dalam meter
+function hitungJarakMeter(lat1: number, lon1: number, lat2: number, lon2: number): number {
+  const R = 6371000; // Radius bumi dalam meter
+  const toRad = (deg: number) => (deg * Math.PI) / 180;
+  const dLat = toRad(lat2 - lat1);
+  const dLon = toRad(lon2 - lon1);
+  const a =
+    Math.sin(dLat / 2) * Math.sin(dLat / 2) +
+    Math.cos(toRad(lat1)) * Math.cos(toRad(lat2)) * Math.sin(dLon / 2) * Math.sin(dLon / 2);
+  const c = 2 * Math.atan2(Math.sqrt(a), Math.sqrt(1 - a));
+  return R * c;
+}
+
 export default function HalamanKaryawan() {
   const [activeTab, setActiveTab] = useState<'absen' | 'lembur' | 'kasbon'>('absen');
   const [daftarKaryawan, setDaftarKaryawan] = useState<Karyawan[]>([]);
@@ -144,6 +173,81 @@ export default function HalamanKaryawan() {
     return true;
   };
 
+  // Validasi Lokasi GPS dalam radius 50 meter dari toko
+  const validasiLokasiGPS = (): Promise<boolean> => {
+    return new Promise((resolve) => {
+      if (!navigator.geolocation) {
+        setPesan('❌ Browser HP Anda tidak mendukung GPS.');
+        resolve(false);
+        return;
+      }
+
+      setPesan('📍 Mengecek lokasi GPS Anda...');
+
+      navigator.geolocation.getCurrentPosition(
+        (pos) => {
+          const userLat = pos.coords.latitude;
+          const userLng = pos.coords.longitude;
+
+          const karyawan = daftarKaryawan.find((k) => k.id === selectedId);
+          const cabangText = (karyawan?.cabang || karyawan?.lokasi_toko || '').toLowerCase();
+
+          let targetToko = null;
+          if (cabangText.includes('antapani')) {
+            targetToko = LOKASI_TOKO.antapani;
+          } else if (cabangText.includes('jatinangor')) {
+            targetToko = LOKASI_TOKO.jatinangor;
+          }
+
+          if (targetToko) {
+            const jarak = Math.round(
+              hitungJarakMeter(userLat, userLng, targetToko.lat, targetToko.lng)
+            );
+            if (jarak > RADIUS_MAKSIMAL_METER) {
+              setPesan(
+                `❌ Anda berada ${jarak}m dari ${targetToko.nama}. Maksimal radius absen adalah ${RADIUS_MAKSIMAL_METER}m.`
+              );
+              resolve(false);
+              return;
+            }
+            resolve(true);
+          } else {
+            // Jika cabang belum diisi di data karyawan, cek ke toko terdekat
+            const jarakAntapani = Math.round(
+              hitungJarakMeter(userLat, userLng, LOKASI_TOKO.antapani.lat, LOKASI_TOKO.antapani.lng)
+            );
+            const jarakJatinangor = Math.round(
+              hitungJarakMeter(userLat, userLng, LOKASI_TOKO.jatinangor.lat, LOKASI_TOKO.jatinangor.lng)
+            );
+            const jarakTerdekat = Math.min(jarakAntapani, jarakJatinangor);
+
+            if (jarakTerdekat > RADIUS_MAKSIMAL_METER) {
+              setPesan(
+                `❌ Anda berada ${jarakTerdekat}m dari toko terdekat. Maksimal radius absen adalah ${RADIUS_MAKSIMAL_METER}m.`
+              );
+              resolve(false);
+              return;
+            }
+            resolve(true);
+          }
+        },
+        (err) => {
+          if (err.code === err.PERMISSION_DENIED) {
+            setPesan('❌ Izin lokasi (GPS) ditolak. Aktifkan izin lokasi di browser HP Anda.');
+          } else {
+            setPesan('❌ Gagal mendapatkan lokasi GPS. Pastikan GPS HP aktif dan sinyal stabil.');
+          }
+          resolve(false);
+        },
+        {
+          enableHighAccuracy: true,
+          timeout: 10000,
+          maximumAge: 0,
+        }
+      );
+    });
+  };
+
   const handlePilihFoto = (e: React.ChangeEvent<HTMLInputElement>) => {
     const file = e.target.files?.[0];
     if (file) {
@@ -172,9 +276,15 @@ export default function HalamanKaryawan() {
       setPesan('❌ Wajib ambil foto selfie terlebih dahulu.');
       return;
     }
-    setLoading(true);
-    setPesan('');
 
+    setLoading(true);
+    const lokasiValid = await validasiLokasiGPS();
+    if (!lokasiValid) {
+      setLoading(false);
+      return;
+    }
+
+    setPesan('Mengupload foto & mencatat absen...');
     try {
       const fotoUrl = await uploadFoto('masuk');
       const { data, error } = await supabase
@@ -211,9 +321,15 @@ export default function HalamanKaryawan() {
       setPesan('❌ Wajib ambil foto selfie terlebih dahulu.');
       return;
     }
-    setLoading(true);
-    setPesan('');
 
+    setLoading(true);
+    const lokasiValid = await validasiLokasiGPS();
+    if (!lokasiValid) {
+      setLoading(false);
+      return;
+    }
+
+    setPesan('Mengupload foto & mencatat absen...');
     try {
       const fotoUrl = await uploadFoto('pulang');
       const { data, error } = await supabase
@@ -444,6 +560,10 @@ export default function HalamanKaryawan() {
                     />
                   )}
                 </div>
+
+                <p className="text-xs text-gray-400 text-center">
+                  📍 Wajib berada dalam radius {RADIUS_MAKSIMAL_METER}m dari toko
+                </p>
               </div>
             )}
 
@@ -459,7 +579,7 @@ export default function HalamanKaryawan() {
                 disabled={loading}
                 className="w-full bg-green-600 hover:bg-green-700 text-white font-bold py-4 rounded-xl transition disabled:opacity-50"
               >
-                {loading ? 'Mengupload & Mencatat...' : 'Absen Masuk Sekarang'}
+                {loading ? 'Memproses...' : 'Absen Masuk Sekarang'}
               </button>
             ) : !absenHariIni.jam_pulang ? (
               <div className="space-y-3">
@@ -471,7 +591,7 @@ export default function HalamanKaryawan() {
                   disabled={loading}
                   className="w-full bg-amber-500 hover:bg-amber-600 text-white font-bold py-4 rounded-xl transition disabled:opacity-50"
                 >
-                  {loading ? 'Mengupload & Mencatat...' : 'Absen Pulang Sekarang'}
+                  {loading ? 'Memproses...' : 'Absen Pulang Sekarang'}
                 </button>
               </div>
             ) : (
