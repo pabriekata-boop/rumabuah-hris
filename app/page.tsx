@@ -494,6 +494,7 @@ export default function HalamanKaryawan() {
           nominal: nominalAngka,
           jumlah: nominalAngka,
           keperluan: keperluanKasbon.trim(),
+          keterangan: keperluanKasbon.trim(),
           status: 'Pending',
         },
       ]);
