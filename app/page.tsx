@@ -509,7 +509,10 @@ export default function HalamanKaryawan() {
       setPinInput('');
       setPesan('✅ Pengajuan kasbon terkirim! Menunggu persetujuan Manajer/Owner.');
     } catch (error: unknown) {
-      const msg = error instanceof Error ? error.message : 'Terjadi kesalahan';
+      const msg =
+        error instanceof Error
+          ? error.message
+          : (error as { message?: string })?.message || JSON.stringify(error);
       setPesan('❌ Gagal mengajukan kasbon: ' + msg);
     } finally {
       setLoading(false);
