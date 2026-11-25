@@ -492,6 +492,7 @@ export default function HalamanKaryawan() {
           karyawan_id: selectedId,
           tanggal: tanggalHariIni,
           nominal: nominalAngka,
+          jumlah: nominalAngka,
           keperluan: keperluanKasbon.trim(),
           status: 'Pending',
         },
